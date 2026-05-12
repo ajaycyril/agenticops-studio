@@ -41,7 +41,10 @@ export function errorResponse(error: unknown) {
       ok: false,
       error: {
         code: "UNEXPECTED_ERROR",
-        message: "The request failed in a controlled error boundary.",
+        message:
+          error instanceof Error
+            ? `The request failed in a controlled error boundary: ${error.message}`
+            : "The request failed in a controlled error boundary.",
         recoverable: true
       }
     },

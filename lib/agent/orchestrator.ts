@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { env, isOpenAIConfigured } from "@/lib/env";
 import { agenticJsonSchema, agenticResultSchema } from "@/lib/agent/schemas";
 import { agentSystemPrompt, buildAgentUserPrompt } from "@/lib/agent/prompts";
+import { AppError } from "@/lib/errors";
 import type { AgenticResult, IncidentState, MLResult } from "@/lib/types";
 
 type AgentControls = {
@@ -125,47 +126,111 @@ export async function runAgenticOrchestrator(payload: unknown) {
   }
 
   const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: env.OPENAI_TIMEOUT_MS, maxRetries: 0 });
-  const response = await client.responses.create({
-    model: env.OPENAI_MODEL,
-    max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
-    input: [
-      { role: "system", content: agentSystemPrompt },
-      { role: "user", content: buildAgentUserPrompt(payload) }
-    ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "AgenticResult",
-        schema: agenticJsonSchema,
-        strict: true
+  try {
+    const response = await client.responses.create({
+      model: env.OPENAI_MODEL,
+      max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
+      input: [
+        { role: "system", content: agentSystemPrompt },
+        { role: "user", content: buildAgentUserPrompt(payload) }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "AgenticResult",
+          schema: agenticJsonSchema,
+          strict: true
+        }
       }
+    });
+
+    let firstParsed: unknown;
+    try {
+      firstParsed = JSON.parse(response.output_text);
+    } catch {
+      throw new AppError({
+        code: "AGENT_INVALID_JSON",
+        message: "OpenAI returned non-JSON content for the structured response.",
+        recoverable: true,
+        status: 502
+      });
     }
-  });
 
-  const firstPass = agenticResultSchema.safeParse(JSON.parse(response.output_text));
-  if (firstPass.success) return { result: firstPass.data, provider: "openai" as const, setupRequired: false };
+    const firstPass = agenticResultSchema.safeParse(firstParsed);
+    if (firstPass.success) return { result: firstPass.data, provider: "openai" as const, setupRequired: false };
 
-  if (env.OPENAI_MAX_AGENT_CALLS_PER_RUN < 2) {
-    throw new Error("OpenAI structured output failed validation and repair is disabled by OPENAI_MAX_AGENT_CALLS_PER_RUN.");
+    if (env.OPENAI_MAX_AGENT_CALLS_PER_RUN < 2) {
+      throw new AppError({
+        code: "AGENT_SCHEMA_VALIDATION_FAILED",
+        message: "Structured output failed schema validation. Enable one repair call by setting OPENAI_MAX_AGENT_CALLS_PER_RUN=2.",
+        recoverable: true,
+        status: 502
+      });
+    }
+
+    const repair = await client.responses.create({
+      model: env.OPENAI_MODEL,
+      max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
+      input: [
+        { role: "system", content: `${agentSystemPrompt}\nRepair the previous invalid JSON so it exactly matches the required schema.` },
+        { role: "user", content: response.output_text }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "AgenticResult",
+          schema: agenticJsonSchema,
+          strict: true
+        }
+      }
+    });
+
+    let repairedParsed: unknown;
+    try {
+      repairedParsed = JSON.parse(repair.output_text);
+    } catch {
+      throw new AppError({
+        code: "AGENT_REPAIR_INVALID_JSON",
+        message: "Repair call returned invalid JSON.",
+        recoverable: true,
+        status: 502
+      });
+    }
+
+    const repaired = agenticResultSchema.safeParse(repairedParsed);
+    if (!repaired.success) {
+      throw new AppError({
+        code: "AGENT_REPAIR_SCHEMA_FAILED",
+        message: "Repair call still failed schema validation.",
+        recoverable: true,
+        status: 502
+      });
+    }
+
+    return { result: repaired.data, provider: "openai" as const, setupRequired: false };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    if (error instanceof OpenAI.APIError) {
+      throw new AppError({
+        code: "OPENAI_API_ERROR",
+        message: `OpenAI request failed (${error.status ?? "unknown"}): ${error.message}`,
+        recoverable: true,
+        status: 502
+      });
+    }
+    if (error instanceof Error && error.message.toLowerCase().includes("timeout")) {
+      throw new AppError({
+        code: "OPENAI_TIMEOUT",
+        message: "OpenAI request timed out. Increase OPENAI_TIMEOUT_MS or reduce token budget.",
+        recoverable: true,
+        status: 504
+      });
+    }
+    throw new AppError({
+      code: "AGENT_RUN_FAILED",
+      message: error instanceof Error ? error.message : "Agent run failed unexpectedly.",
+      recoverable: true,
+      status: 500
+    });
   }
-
-  const repair = await client.responses.create({
-    model: env.OPENAI_MODEL,
-    max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
-    input: [
-      { role: "system", content: `${agentSystemPrompt}\nRepair the previous invalid JSON so it exactly matches the required schema.` },
-      { role: "user", content: response.output_text }
-    ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "AgenticResult",
-        schema: agenticJsonSchema,
-        strict: true
-      }
-    }
-  });
-
-  const repaired = agenticResultSchema.parse(JSON.parse(repair.output_text));
-  return { result: repaired, provider: "openai" as const, setupRequired: false };
 }

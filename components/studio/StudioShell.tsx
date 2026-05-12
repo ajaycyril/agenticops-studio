@@ -113,6 +113,9 @@ export function StudioShell() {
     authorityPosture: "critical_only" as "strict" | "approval_gated" | "critical_only",
     operatorInstruction: "Prioritize life safety, evidence sufficiency, and no unsupervised physical action."
   });
+  const [guidedRunStatus, setGuidedRunStatus] = useState<
+    Array<{ step: string; status: "pending" | "success" | "failed"; detail?: string }>
+  >([]);
 
   const tools = useMemo(() => getToolRegistry(), []);
 
@@ -280,9 +283,9 @@ export function StudioShell() {
     });
     const data = await response.json();
     if (!data.ok) {
-      setMessage(data.error.message);
+      setMessage(`Vision step failed: ${data.error.message}`);
       appendTrace({ type: "error", actor: "vision_model", status: "failed", output: data.error });
-      return;
+      return false;
     }
     const result = data.result as VisionResult;
     setVisionProvider(result.provider);
@@ -304,6 +307,7 @@ export function StudioShell() {
       status: "success",
       explanation: result.message
     });
+    return true;
   }
 
   async function runAgent() {
@@ -324,9 +328,9 @@ export function StudioShell() {
     });
     const data = await response.json();
     if (!data.ok) {
-      setMessage(data.error.message);
+      setMessage(`Agent step failed: ${data.error.message}`);
       appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: data.error });
-      return;
+      return false;
     }
     const result = data.result as AgenticResult;
     setAgentProvider(data.provider === "openai" ? "openai" : "sample");
@@ -342,14 +346,52 @@ export function StudioShell() {
         status: policy.blocked ? "blocked" : policy.requiresHumanApproval ? "pending" : "success"
       })
     );
+    return true;
   }
 
   async function runGuidedIncident() {
-    setMessage("Running guided incident: rules, vision, ML prediction, agent planner, policy checks. Decision record is written after vision and agent finish.");
+    setMessage("Running guided incident end-to-end.");
+    setGuidedRunStatus([
+      { step: "Rule engine", status: "pending" },
+      { step: "Vision inference", status: "pending" },
+      { step: "ML prediction", status: "pending" },
+      { step: "Agent planner", status: "pending" },
+      { step: "Policy evaluation", status: "pending" },
+      { step: "Decision record", status: "pending" }
+    ]);
     runRules();
-    await runVision();
+    setGuidedRunStatus((items) => items.map((item) => (item.step === "Rule engine" ? { ...item, status: "success" } : item)));
+    const visionOk = await runVision();
+    if (!visionOk) {
+      setGuidedRunStatus((items) =>
+        items.map((item) =>
+          item.step === "Vision inference" ? { ...item, status: "failed", detail: "Check Roboflow key/model or input image format." } : item
+        )
+      );
+      return;
+    }
+    setGuidedRunStatus((items) => items.map((item) => (item.step === "Vision inference" ? { ...item, status: "success" } : item)));
     await runPrediction();
-    await runAgent();
+    setGuidedRunStatus((items) => items.map((item) => (item.step === "ML prediction" ? { ...item, status: "success" } : item)));
+    const agentOk = await runAgent();
+    if (!agentOk) {
+      setGuidedRunStatus((items) =>
+        items.map((item) =>
+          item.step === "Agent planner"
+            ? { ...item, status: "failed", detail: "Check OpenAI key, model access, token cap, or increase OPENAI_MAX_AGENT_CALLS_PER_RUN." }
+            : item
+        )
+      );
+      return;
+    }
+    setGuidedRunStatus((items) =>
+      items.map((item) =>
+        item.step === "Agent planner" || item.step === "Policy evaluation" ? { ...item, status: "success" } : item
+      )
+    );
+    writeDecisionRecord();
+    setGuidedRunStatus((items) => items.map((item) => (item.step === "Decision record" ? { ...item, status: "success" } : item)));
+    setMessage("Guided incident completed successfully.");
   }
 
   function resolveApproval(action: "unlockGate" | "dispatchDrone" | "notifyAuthority", approved: boolean) {
@@ -465,6 +507,35 @@ export function StudioShell() {
       </motion.div>
 
       {message ? <Alert>{message}</Alert> : null}
+      {guidedRunStatus.length ? (
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-sm">Live Execution Status</CardTitle>
+            <CardDescription>End-to-end run telemetry for the current guided incident.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {guidedRunStatus.map((item) => (
+              <div key={item.step} className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-200">{item.step}</span>
+                  <Badge
+                    className={
+                      item.status === "success"
+                        ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
+                        : item.status === "failed"
+                          ? "border-red-400/30 bg-red-500/10 text-red-100"
+                          : "border-amber-300/30 bg-amber-300/10 text-amber-100"
+                    }
+                  >
+                    {item.status}
+                  </Badge>
+                </div>
+                {item.detail ? <p className="mt-2 text-slate-400">{item.detail}</p> : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Tabs defaultValue="scenario">
         <TabsList>
