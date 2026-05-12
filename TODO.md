@@ -125,4 +125,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Render React Flow node labels as rich visible nodes with live runtime details
 - [x] Add workflow summary cards for evidence, governance, and audit outputs
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
