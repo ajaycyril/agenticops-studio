@@ -154,4 +154,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Make Physical AI, Edge AI, ML, and Agentic boundaries obvious at first glance
 - [x] Keep existing features and runtime integrations intact
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
