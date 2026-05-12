@@ -15,10 +15,13 @@ import {
   FileJson,
   Gauge,
   GitBranch,
+  PlayCircle,
   RadioTower,
   Route,
   Server,
-  ShieldCheck
+  ShieldCheck,
+  Timer,
+  Workflow
 } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +54,8 @@ import { saveTrace } from "@/lib/trace/trace-store";
 import type { AgenticResult, DecisionRecord, IncidentState, MLResult, PolicyDecision, RuleResult, TraceEvent, VisionResult } from "@/lib/types";
 
 const sampleNames = ["cooking-smoke", "fire-smoke-room", "unclear-camera"];
+const studioTabs = ["journey", "scenario", "physical", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"] as const;
+type StudioTab = (typeof studioTabs)[number];
 
 type HealthStatus = {
   status: "ok";
@@ -116,6 +121,7 @@ export function StudioShell() {
   const [guidedRunStatus, setGuidedRunStatus] = useState<
     Array<{ step: string; status: "pending" | "success" | "failed"; detail?: string }>
   >([]);
+  const [activeTab, setActiveTab] = useState<StudioTab>("journey");
 
   const tools = useMemo(() => getToolRegistry(), []);
 
@@ -193,6 +199,60 @@ export function StudioShell() {
       title: "Response Planner Agent",
       output: agenticResult ? `${agenticResult.proposedActions.length} action proposals created. The model does not execute them.` : "Run agent to generate a governed action plan.",
       evidence: agenticResult?.proposedActions.map((proposal) => proposal.action) ?? []
+    }
+  ];
+
+  const demoJourneys = [
+    {
+      id: "executive",
+      title: "Executive Journey (3 min)",
+      icon: Timer,
+      steps: [
+        "Open Rule vs ML vs Agentic comparison",
+        "Run guided incident",
+        "Show policy gates and human approvals",
+        "Show decision record and trace"
+      ],
+      run: async () => {
+        loadScenario(1);
+        setActiveTab("comparison");
+        await runGuidedIncident();
+        setActiveTab("record");
+      }
+    },
+    {
+      id: "technical",
+      title: "Technical Journey (8 min)",
+      icon: Workflow,
+      steps: [
+        "Start with Physical + Edge AI layers",
+        "Run live/sampled vision route",
+        "Tune and train browser ML",
+        "Run agent with runtime controls",
+        "Inspect trace and policy outcomes"
+      ],
+      run: async () => {
+        loadScenario(2);
+        setActiveTab("physical");
+        setMessage("Technical journey primed. Move through Physical -> Vision -> ML -> Workflow -> Trace.");
+      }
+    },
+    {
+      id: "live-ops",
+      title: "Live Ops Journey",
+      icon: PlayCircle,
+      steps: [
+        "Select incident preset",
+        "Run vision, ML, and agent orchestration",
+        "Resolve required approvals",
+        "Write decision record",
+        "Generate incident report"
+      ],
+      run: async () => {
+        loadScenario(4);
+        setActiveTab("scenario");
+        await runGuidedIncident();
+      }
     }
   ];
 
@@ -537,14 +597,60 @@ export function StudioShell() {
         </Card>
       ) : null}
 
-      <Tabs defaultValue="scenario">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as StudioTab)}>
         <TabsList>
-          {["scenario", "physical", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"].map((tab) => (
+          {studioTabs.map((tab) => (
             <TabsTrigger key={tab} value={tab}>
               {tab}
             </TabsTrigger>
           ))}
         </TabsList>
+
+        <TabsContent value="journey">
+          <div className="grid gap-4 lg:grid-cols-3">
+            {demoJourneys.map((journey) => (
+              <Card key={journey.id}>
+                <CardHeader>
+                  <journey.icon className="h-5 w-5 text-cyan-200" />
+                  <CardTitle>{journey.title}</CardTitle>
+                  <CardDescription>Customer-facing runbook with explicit steps and expected outcomes.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    {journey.steps.map((step, index) => (
+                      <div key={step} className="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+                        {index + 1}. {step}
+                      </div>
+                    ))}
+                  </div>
+                  <Button onClick={journey.run} className="w-full">
+                    <Route className="h-4 w-4" /> Start Journey
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle>Live Integration Signal</CardTitle>
+              <CardDescription>These indicators confirm whether the demo is actually running live services or fallbacks.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                <p className="font-medium text-slate-100">OpenAI Agent Runtime</p>
+                <p className="mt-1">{health?.openaiConfigured ? "Live server-side Responses API active." : "Fallback planner active."}</p>
+              </div>
+              <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                <p className="font-medium text-slate-100">Roboflow Vision Runtime</p>
+                <p className="mt-1">{health?.roboflowConfigured ? "Live hosted inference active." : "Sample vision fallback active."}</p>
+              </div>
+              <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                <p className="font-medium text-slate-100">Browser ML Runtime</p>
+                <p className="mt-1">TensorFlow.js training and prediction run in-browser with live tuning controls.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="scenario">
           <div className="grid gap-4 lg:grid-cols-[.95fr_1.05fr]">
