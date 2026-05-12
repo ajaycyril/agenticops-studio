@@ -99,3 +99,11 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add GitHub Actions Vercel deployment workflow using repository secrets
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production app
+
+## Runtime Reliability and Demo Clarity Hardening
+
+- [x] Add explicit planner running state and visible UI progress for agent step
+- [x] Add automatic deterministic fallback when OpenAI returns quota/rate limit 429
+- [x] Upgrade vision demo samples to raster image assets and send sample payloads through `/api/vision/roboflow` for live inference
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push changes and redeploy production

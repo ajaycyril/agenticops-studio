@@ -19,7 +19,8 @@ export async function POST(request: Request) {
         incidentId: parsed.incident.incidentId,
         event: "fallback_mode",
         status: "success",
-        latencyMs: Date.now() - start
+        latencyMs: Date.now() - start,
+        metadata: { message: response.message ?? "sample planner used" }
       });
     }
     logInfo({

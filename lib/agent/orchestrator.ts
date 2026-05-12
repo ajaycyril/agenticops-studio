@@ -11,6 +11,13 @@ type AgentControls = {
   operatorInstruction?: string;
 };
 
+type AgentRunResponse = {
+  result: AgenticResult;
+  provider: "openai" | "sample";
+  setupRequired: boolean;
+  message?: string;
+};
+
 export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<MLResult, "fireProbability" | "riskLevel">, controls: AgentControls = {}): AgenticResult {
   const confidence = Math.max(incident.cameraSmokeConfidence, incident.cameraFireConfidence);
   const conservative = controls.operatingMode === "conservative";
@@ -119,10 +126,15 @@ export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<ML
   };
 }
 
-export async function runAgenticOrchestrator(payload: unknown) {
+export async function runAgenticOrchestrator(payload: unknown): Promise<AgentRunResponse> {
   const parsed = payload as { incident: IncidentState; mlResult: MLResult; agentControls?: AgentControls };
   if (!isOpenAIConfigured()) {
-    return { result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls), provider: "sample" as const, setupRequired: true };
+    return {
+      result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
+      provider: "sample",
+      setupRequired: true,
+      message: "OPENAI_API_KEY is missing. Deterministic governed fallback planner used for this run."
+    };
   }
 
   const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: env.OPENAI_TIMEOUT_MS, maxRetries: 0 });
@@ -211,6 +223,14 @@ export async function runAgenticOrchestrator(payload: unknown) {
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof OpenAI.APIError) {
+      if (error.status === 429) {
+        return {
+          result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
+          provider: "sample",
+          setupRequired: false,
+          message: "OpenAI quota/rate limit reached (429). Deterministic governed fallback planner used for this run."
+        };
+      }
       throw new AppError({
         code: "OPENAI_API_ERROR",
         message: `OpenAI request failed (${error.status ?? "unknown"}): ${error.message}`,

@@ -53,7 +53,12 @@ import { createTraceEvent } from "@/lib/trace/create-trace-event";
 import { saveTrace } from "@/lib/trace/trace-store";
 import type { AgenticResult, DecisionRecord, IncidentState, MLResult, PolicyDecision, RuleResult, TraceEvent, VisionResult } from "@/lib/types";
 
-const sampleNames = ["cooking-smoke", "fire-smoke-room", "unclear-camera"];
+const sampleImageMap = {
+  "cooking-smoke": { file: "cooking-smoke.jpg", label: "Cooking smoke false alarm" },
+  "fire-smoke-room": { file: "fire-smoke-room.jpg", label: "Confirmed smoke + flame" },
+  "unclear-camera": { file: "unclear-camera.jpg", label: "Low-confidence/unclear frame" }
+} as const;
+const sampleNames = Object.keys(sampleImageMap) as Array<keyof typeof sampleImageMap>;
 const studioTabs = ["journey", "scenario", "physical", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"] as const;
 type StudioTab = (typeof studioTabs)[number];
 
@@ -102,7 +107,7 @@ export function StudioShell() {
   const [model, setModel] = useState<tf.LayersModel | undefined>();
   const [modelMetrics, setModelMetrics] = useState<MLResult["metrics"]>();
   const [modelVersion, setModelVersion] = useState(() => loadModelVersion() ?? DEFAULT_MODEL_VERSION);
-  const [sampleName, setSampleName] = useState("fire-smoke-room");
+  const [sampleName, setSampleName] = useState<keyof typeof sampleImageMap>("fire-smoke-room");
   const [uploadedImage, setUploadedImage] = useState<string | undefined>();
   const [message, setMessage] = useState<string | undefined>();
   const [health, setHealth] = useState<HealthStatus | undefined>();
@@ -122,6 +127,8 @@ export function StudioShell() {
     Array<{ step: string; status: "pending" | "success" | "failed"; detail?: string }>
   >([]);
   const [activeTab, setActiveTab] = useState<StudioTab>("journey");
+  const [visionRunning, setVisionRunning] = useState(false);
+  const [agentRunning, setAgentRunning] = useState(false);
 
   const tools = useMemo(() => getToolRegistry(), []);
 
@@ -334,79 +341,134 @@ export function StudioShell() {
     appendTrace({ type: "ml_model_predicted", actor: "ml_model", input: incident, output: result, status: "success" });
   }
 
+  async function loadSampleImageAsDataUrl(name: keyof typeof sampleImageMap) {
+    const response = await fetch(`/sample-images/${sampleImageMap[name].file}`);
+    if (!response.ok) throw new Error(`Failed to load sample image ${name}`);
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === "string") resolve(reader.result);
+        else reject(new Error("Invalid sample image payload"));
+      };
+      reader.onerror = () => reject(new Error("Failed to read sample image"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
   async function runVision() {
     const start = performance.now();
-    const response = await fetch("/api/vision/roboflow", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ incidentId: incident.incidentId, sampleName, imageBase64: uploadedImage })
-    });
-    const data = await response.json();
-    if (!data.ok) {
-      setMessage(`Vision step failed: ${data.error.message}`);
-      appendTrace({ type: "error", actor: "vision_model", status: "failed", output: data.error });
+    setVisionRunning(true);
+    setMessage("Running vision inference...");
+    try {
+      const imagePayload = uploadedImage ?? (await loadSampleImageAsDataUrl(sampleName));
+      const response = await fetch("/api/vision/roboflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incidentId: incident.incidentId, sampleName, imageBase64: imagePayload })
+      });
+      const data = await response.json();
+      if (!data.ok) {
+        setMessage(`Vision step failed: ${data.error.message}`);
+        appendTrace({ type: "error", actor: "vision_model", status: "failed", output: data.error });
+        return false;
+      }
+      const result = data.result as VisionResult;
+      setVisionProvider(result.provider);
+      setVisionResult(result);
+      setIncident((current) => ({
+        ...current,
+        cameraSmokeConfidence: result.maxSmokeConfidence,
+        cameraFireConfidence: result.maxFireConfidence,
+        visionProvider: result.provider,
+        visionDetections: result.detections,
+        imageUrl: uploadedImage ?? `/sample-images/${sampleImageMap[sampleName].file}`
+      }));
+      setMessage(
+        result.provider === "roboflow"
+          ? `Live Roboflow inference completed in ${result.latencyMs} ms.`
+          : result.message ?? "Sample vision fallback used."
+      );
+      appendTrace({
+        type: "vision_model_called",
+        actor: "vision_model",
+        input: { provider: result.provider, sampleName },
+        output: result,
+        latencyMs: Math.round(performance.now() - start),
+        status: "success",
+        explanation: result.message
+      });
+      return true;
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "Vision step failed unexpectedly.";
+      setMessage(`Vision step failed: ${text}`);
+      appendTrace({ type: "error", actor: "vision_model", status: "failed", output: { message: text } });
       return false;
+    } finally {
+      setVisionRunning(false);
     }
-    const result = data.result as VisionResult;
-    setVisionProvider(result.provider);
-    setVisionResult(result);
-    setIncident((current) => ({
-      ...current,
-      cameraSmokeConfidence: result.maxSmokeConfidence,
-      cameraFireConfidence: result.maxFireConfidence,
-      visionProvider: result.provider,
-      visionDetections: result.detections,
-      imageUrl: uploadedImage ?? `/sample-images/${sampleName}.svg`
-    }));
-    appendTrace({
-      type: "vision_model_called",
-      actor: "vision_model",
-      input: { provider: result.provider, sampleName },
-      output: result,
-      latencyMs: Math.round(performance.now() - start),
-      status: "success",
-      explanation: result.message
-    });
-    return true;
   }
 
   async function runAgent() {
     const start = performance.now();
+    setAgentRunning(true);
+    setMessage("Running agentic planner...");
     appendTrace({ type: "agent_called", actor: "llm_agent", status: "pending", input: { incident, mlResult, ruleResult } });
-    const response = await fetch("/api/agent/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        incident,
-        ruleResult,
-        mlResult,
-        visionResult,
-        toolRegistry: tools,
-        policySummary: "TypeScript fire response policy evaluator v1",
-        agentControls
-      })
-    });
-    const data = await response.json();
-    if (!data.ok) {
-      setMessage(`Agent step failed: ${data.error.message}`);
-      appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: data.error });
-      return false;
-    }
-    const result = data.result as AgenticResult;
-    setAgentProvider(data.provider === "openai" ? "openai" : "sample");
-    const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), incident, mlResult);
-    setAgenticResult(result);
-    setPolicyDecisions(policies);
-    appendTrace({ type: "agent_output_validated", actor: "llm_agent", output: result, latencyMs: Math.round(performance.now() - start), status: "success" });
-    policies.forEach((policy) =>
+    try {
+      const response = await fetch("/api/agent/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          incident,
+          ruleResult,
+          mlResult,
+          visionResult,
+          toolRegistry: tools,
+          policySummary: "TypeScript fire response policy evaluator v1",
+          agentControls
+        })
+      });
+      const data = await response.json();
+      if (!data.ok) {
+        setMessage(`Agent step failed: ${data.error.message}`);
+        appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: data.error });
+        return false;
+      }
+      const result = data.result as AgenticResult;
+      setAgentProvider(data.provider === "openai" ? "openai" : "sample");
+      const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), incident, mlResult);
+      setAgenticResult(result);
+      setPolicyDecisions(policies);
+      if (data.provider === "sample" && data.message) {
+        setMessage(data.message);
+      } else {
+        setMessage("Agentic planner completed.");
+      }
       appendTrace({
-        type: policy.blocked ? "action_blocked" : policy.requiresHumanApproval ? "human_approval_requested" : "policy_checked",
-        actor: "policy",
-        output: policy,
-        status: policy.blocked ? "blocked" : policy.requiresHumanApproval ? "pending" : "success"
-      })
-    );
-    return true;
+        type: "agent_output_validated",
+        actor: "llm_agent",
+        output: result,
+        latencyMs: Math.round(performance.now() - start),
+        status: "success",
+        explanation: data.message
+      });
+      policies.forEach((policy) =>
+        appendTrace({
+          type: policy.blocked ? "action_blocked" : policy.requiresHumanApproval ? "human_approval_requested" : "policy_checked",
+          actor: "policy",
+          output: policy,
+          status: policy.blocked ? "blocked" : policy.requiresHumanApproval ? "pending" : "success"
+        })
+      );
+      return true;
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "Agent step failed unexpectedly.";
+      setMessage(`Agent step failed: ${text}`);
+      appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: { message: text } });
+      return false;
+    } finally {
+      setAgentRunning(false);
+    }
   }
 
   async function runGuidedIncident() {
@@ -781,7 +843,9 @@ export function StudioShell() {
                 <CardDescription>Uses all context, SOP, tools, policy, approvals, traces, and decision records.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button onClick={runAgent}>Run Agentic Planner</Button>
+                <Button onClick={runAgent} disabled={agentRunning}>
+                  {agentRunning ? "Running Agentic Planner..." : "Run Agentic Planner"}
+                </Button>
                 <p className="text-xs leading-5 text-slate-400">
                   What actually runs: OpenAI Responses API when configured; otherwise deterministic fallback. In both modes, schema validation, policy checks, approvals, trace events, and decision records still run.
                 </p>
@@ -803,9 +867,18 @@ export function StudioShell() {
               <CardContent className="space-y-4">
                 <div className="grid gap-2 sm:grid-cols-3">
                   {sampleNames.map((name) => (
-                    <Button key={name} variant={sampleName === name ? "default" : "secondary"} onClick={() => setSampleName(name)}>
-                      {name}
-                    </Button>
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setSampleName(name)}
+                      className={`overflow-hidden rounded-lg border text-left transition ${
+                        sampleName === name ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-black/20 hover:border-cyan-300/40"
+                      }`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- previewing static demo samples. */}
+                      <img src={`/sample-images/${sampleImageMap[name].file}`} alt={sampleImageMap[name].label} className="h-20 w-full object-cover" />
+                      <div className="px-3 py-2 text-xs text-slate-200">{sampleImageMap[name].label}</div>
+                    </button>
                   ))}
                 </div>
                 <input
@@ -820,11 +893,13 @@ export function StudioShell() {
                     reader.readAsDataURL(file);
                   }}
                 />
-                <Button onClick={runVision}>Run Vision Model</Button>
+                <Button onClick={runVision} disabled={visionRunning}>
+                  {visionRunning ? "Running Vision Inference..." : "Run Vision Model"}
+                </Button>
                 <Badge>{visionProvider === "roboflow" ? "Live Roboflow" : visionProvider === "sample" ? "Sample fallback" : "Not run"}</Badge>
                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- supports user-uploaded data URLs and local demo SVGs. */}
-                  <img src={uploadedImage ?? `/sample-images/${sampleName}.svg`} alt="Selected sample" className="aspect-video w-full object-cover" />
+                  {/* eslint-disable-next-line @next/next/no-img-element -- supports user-uploaded data URLs and local demo raster assets. */}
+                  <img src={uploadedImage ?? `/sample-images/${sampleImageMap[sampleName].file}`} alt="Selected sample" className="aspect-video w-full object-cover" />
                   {(visionResult?.detections ?? []).map((detection, index) => (
                     <div
                       key={`${detection.className}-${index}`}
