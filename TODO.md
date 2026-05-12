@@ -145,3 +145,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add live Physical AI system map with real vs sandbox runtime markers
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Full Showcase UX Redesign
+
+- [x] Reframe Studio around a clear four-act showcase
+- [x] Add obvious live demo actions and proof points for each capability
+- [x] Make Runbook the main guided experience instead of a dense tab list
+- [x] Make Physical AI, Edge AI, ML, and Agentic boundaries obvious at first glance
+- [x] Keep existing features and runtime integrations intact
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
