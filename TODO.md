@@ -106,4 +106,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add automatic deterministic fallback when OpenAI returns quota/rate limit 429
 - [x] Upgrade vision demo samples to raster image assets and send sample payloads through `/api/vision/roboflow` for live inference
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push changes and redeploy production
+- [x] Push changes and redeploy production
