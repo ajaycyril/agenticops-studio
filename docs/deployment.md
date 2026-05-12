@@ -30,3 +30,15 @@ npm run build
 5. Deploy.
 
 Fallback modes work without OpenAI or Roboflow keys.
+
+## GitHub Actions
+
+The repo includes `.github/workflows/ci.yml` for lint, typecheck, tests, and production build on every push and pull request.
+
+Vercel deployment is currently handled by the linked Vercel project. To deploy from GitHub Actions instead, add these repository secrets and a Vercel deploy job:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
+The current Vercel link is enough for normal production deploys from `main`.

@@ -80,3 +80,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] GitHub repo: https://github.com/ajaycyril/agenticops-studio
 - [x] Vercel production: https://agenticops-studio.vercel.app
 - [x] Vercel deployment health route verified
+
+## Demo Clarity Enhancement
+
+- [x] Add live/fallback API status to Studio
+- [x] Add clearer Physical AI and Edge AI walkthrough
+- [x] Add guided demo run path
+- [x] Add visual agent orchestration cards
+- [x] Add GitHub Actions CI workflow
+- [x] Re-run lint, typecheck, tests, and build
+- [~] Redeploy updated production app

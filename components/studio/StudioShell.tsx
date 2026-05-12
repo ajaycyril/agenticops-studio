@@ -1,11 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type * as tf from "@tensorflow/tfjs";
 import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { motion } from "framer-motion";
-import { Activity, AlertTriangle, BrainCircuit, Camera, Cpu, Download, FileJson, Gauge, GitBranch, ShieldCheck } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  BrainCircuit,
+  Camera,
+  Cpu,
+  Download,
+  FileJson,
+  Gauge,
+  GitBranch,
+  RadioTower,
+  Route,
+  Server,
+  ShieldCheck
+} from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +52,14 @@ import type { AgenticResult, DecisionRecord, IncidentState, MLResult, PolicyDeci
 
 const sampleNames = ["cooking-smoke", "fire-smoke-room", "unclear-camera"];
 
+type HealthStatus = {
+  status: "ok";
+  app: string;
+  openaiConfigured: boolean;
+  roboflowConfigured: boolean;
+  timestamp: string;
+};
+
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -67,8 +89,88 @@ export function StudioShell() {
   const [sampleName, setSampleName] = useState("fire-smoke-room");
   const [uploadedImage, setUploadedImage] = useState<string | undefined>();
   const [message, setMessage] = useState<string | undefined>();
+  const [health, setHealth] = useState<HealthStatus | undefined>();
+  const [agentProvider, setAgentProvider] = useState<"openai" | "sample" | "not-run">("not-run");
+  const [visionProvider, setVisionProvider] = useState<"roboflow" | "sample" | "not-run">("not-run");
 
   const tools = useMemo(() => getToolRegistry(), []);
+
+  useEffect(() => {
+    fetch("/api/health")
+      .then((response) => response.json())
+      .then((data: HealthStatus) => setHealth(data))
+      .catch(() => setHealth(undefined));
+  }, []);
+
+  const physicalLayers = [
+    {
+      title: "1. Physical world signals",
+      demo: "Smoke ppm, heat, camera frame, occupancy, wind, drone availability, and gate state are editable incident inputs.",
+      production: "MQTT/IoT ingestion with device identity, timestamps, calibration, and device-health telemetry.",
+      why: "Physical AI starts when software reasons over real-world state, not only text."
+    },
+    {
+      title: "2. Edge perception",
+      demo: "The vision route uses Roboflow when configured or sample inference when not configured.",
+      production: "YOLO/ONNX on edge gateways or camera-side NPUs with offline buffering and evidence pointers.",
+      why: "Edge inference reduces latency, bandwidth, privacy exposure, and cloud dependency."
+    },
+    {
+      title: "3. Risk intelligence",
+      demo: "TensorFlow.js trains a browser-side model and predicts fire probability from fused features.",
+      production: "Model registry, drift monitoring, replay evaluation, calibration, and promotion gates.",
+      why: "ML gives probability. It should not directly execute physical actions."
+    },
+    {
+      title: "4. Agentic control plane",
+      demo: "OpenAI Responses API is called server-side when `OPENAI_API_KEY` is configured; otherwise a deterministic governed planner runs.",
+      production: "Evaluated agent runtime with tool contracts, SOP retrieval, prompt/version governance, and structured output validation.",
+      why: "Agentic AI coordinates models, context, tools, policy, and humans."
+    },
+    {
+      title: "5. Governed execution",
+      demo: "Policy evaluator blocks or approval-gates drone, gate, and authority actions; all physical tools stay sandboxed.",
+      production: "OPA/Rego, RBAC, dual approval, signed tool requests, immutable audit logs, and real command-center queues.",
+      why: "Enterprise agentic AI governs execution before anything touches the physical world."
+    }
+  ];
+
+  const agentNodes = [
+    {
+      title: "Triage Agent",
+      output: agenticResult?.incidentSummary ?? "Run the agent to summarize severity and gaps.",
+      evidence: agenticResult?.riskAssessment.evidence ?? []
+    },
+    {
+      title: "Vision Context Agent",
+      output: visionResult
+        ? `${visionResult.provider} vision returned smoke ${pct(visionResult.maxSmokeConfidence)} and fire ${pct(visionResult.maxFireConfidence)}.`
+        : "Run Edge Vision Lab to attach camera evidence.",
+      evidence: visionResult?.detections.map((detection) => `${detection.className} ${pct(detection.confidence)}`) ?? []
+    },
+    {
+      title: "Risk Agent",
+      output: `ML model ${mlResult.modelVersion} predicts ${pct(mlResult.fireProbability)} fire probability as ${mlResult.riskLevel}.`,
+      evidence: mlResult.featureImportance.slice(0, 3).map((item) => `${item.feature}: ${pct(item.importance)}`)
+    },
+    {
+      title: "SOP Agent",
+      output: agenticResult ? `Retrieved ${agenticResult.sopReferences.join(", ")}.` : "Run agent to retrieve local SOP references.",
+      evidence: agenticResult?.sopReferences ?? []
+    },
+    {
+      title: "Policy Agent",
+      output: policyDecisions.length
+        ? `${policyDecisions.filter((decision) => decision.blocked).length} blocked, ${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} approval-gated.`
+        : "Run the agent to evaluate policy over proposed actions.",
+      evidence: policyDecisions.map((decision) => `${decision.action}: ${decision.blocked ? "blocked" : decision.requiresHumanApproval ? "approval" : "allowed"}`)
+    },
+    {
+      title: "Response Planner Agent",
+      output: agenticResult ? `${agenticResult.proposedActions.length} action proposals created. The model does not execute them.` : "Run agent to generate a governed action plan.",
+      evidence: agenticResult?.proposedActions.map((proposal) => proposal.action) ?? []
+    }
+  ];
 
   function appendTrace(event: Omit<TraceEvent, "id" | "timestamp">) {
     setTrace((current) => {
@@ -161,6 +263,7 @@ export function StudioShell() {
       return;
     }
     const result = data.result as VisionResult;
+    setVisionProvider(result.provider);
     setVisionResult(result);
     setIncident((current) => ({
       ...current,
@@ -203,6 +306,7 @@ export function StudioShell() {
       return;
     }
     const result = data.result as AgenticResult;
+    setAgentProvider(data.provider === "openai" ? "openai" : "sample");
     const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), incident, mlResult);
     setAgenticResult(result);
     setPolicyDecisions(policies);
@@ -215,6 +319,14 @@ export function StudioShell() {
         status: policy.blocked ? "blocked" : policy.requiresHumanApproval ? "pending" : "success"
       })
     );
+  }
+
+  async function runGuidedIncident() {
+    setMessage("Running guided incident: rules, vision, ML prediction, agent planner, policy checks. Decision record is written after vision and agent finish.");
+    runRules();
+    await runVision();
+    await runPrediction();
+    await runAgent();
   }
 
   function resolveApproval(action: "unlockGate" | "dispatchDrone" | "notifyAuthority", approved: boolean) {
@@ -303,6 +415,27 @@ export function StudioShell() {
               </CardContent>
             </Card>
           </CardContent>
+          <CardContent className="grid gap-3 border-t border-white/10 pt-5 md:grid-cols-4">
+            <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm">
+              <div className="flex items-center gap-2 text-slate-100"><Server className="h-4 w-4 text-cyan-200" /> OpenAI API</div>
+              <p className="mt-1 text-xs text-slate-400">
+                {health?.openaiConfigured ? "Live server-side Responses API enabled." : "Fallback planner active. Add OPENAI_API_KEY in Vercel to enable live LLM calls."}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm">
+              <div className="flex items-center gap-2 text-slate-100"><Camera className="h-4 w-4 text-cyan-200" /> Roboflow API</div>
+              <p className="mt-1 text-xs text-slate-400">
+                {health?.roboflowConfigured ? "Live hosted vision inference enabled." : "Sample vision active. Add ROBOFLOW_API_KEY in Vercel for live inference."}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm">
+              <div className="flex items-center gap-2 text-slate-100"><BrainCircuit className="h-4 w-4 text-amber-200" /> Browser ML</div>
+              <p className="mt-1 text-xs text-slate-400">Real TensorFlow.js training runs in your browser with no server key required.</p>
+            </div>
+            <Button onClick={runGuidedIncident} className="h-full min-h-16">
+              <Route className="h-4 w-4" /> Run Guided Incident
+            </Button>
+          </CardContent>
         </Card>
       </motion.div>
 
@@ -310,7 +443,7 @@ export function StudioShell() {
 
       <Tabs defaultValue="scenario">
         <TabsList>
-          {["scenario", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"].map((tab) => (
+          {["scenario", "physical", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"].map((tab) => (
             <TabsTrigger key={tab} value={tab}>
               {tab}
             </TabsTrigger>
@@ -365,6 +498,46 @@ export function StudioShell() {
           </div>
         </TabsContent>
 
+        <TabsContent value="physical">
+          <div className="grid gap-4 xl:grid-cols-[.9fr_1.1fr]">
+            <Card>
+              <CardHeader>
+                <RadioTower className="h-5 w-5 text-cyan-200" />
+                <CardTitle>Physical AI and Edge AI Walkthrough</CardTitle>
+                <CardDescription>
+                  Physical AI is AI connected to real-world signals and actuators. Edge AI is where perception and first-level intelligence run near the device.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {physicalLayers.map((layer) => (
+                  <div key={layer.title} className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <h3 className="text-sm font-semibold text-slate-100">{layer.title}</h3>
+                    <p className="mt-2 text-xs leading-5 text-cyan-100">Demo: {layer.demo}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">Production: {layer.production}</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-100">Why it matters: {layer.why}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Current Physical Incident Inputs</CardTitle>
+                <CardDescription>These are the physical-world signals the workflow turns into governed AI decisions.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2">
+                <MetricCard label="Smoke sensor" value={`${incident.smokePpm} ppm`} />
+                <MetricCard label="Heat sensor" value={`${incident.temperatureC} C`} />
+                <MetricCard label="Camera smoke" value={pct(incident.cameraSmokeConfidence)} />
+                <MetricCard label="Camera fire" value={pct(incident.cameraFireConfidence)} />
+                <MetricCard label="Occupancy" value={incident.occupancyStatus} />
+                <MetricCard label="Drone" value={incident.droneAvailable ? "available" : "unavailable"} />
+                <MetricCard label="Gate" value={incident.gateLocked ? "locked" : "unlocked"} />
+                <MetricCard label="Sensor health" value={pct(incident.sensorHealth)} />
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
         <TabsContent value="comparison">
           <div className="grid gap-4 lg:grid-cols-3">
             <Card>
@@ -376,6 +549,9 @@ export function StudioShell() {
               <CardContent className="space-y-3">
                 <pre className="rounded-md border border-white/10 bg-black/30 p-3 text-xs text-cyan-100">IF smoke_ppm &gt;= 70 THEN raise_alarm</pre>
                 <Button onClick={runRules}>Run Rules</Button>
+                <p className="text-xs leading-5 text-slate-400">
+                  What actually runs: a deterministic TypeScript rule engine in <code>lib/rule/rule-engine.ts</code>. It intentionally ignores camera, SOP, tools, and approvals.
+                </p>
                 <RiskBadge level={ruleResult.severity} />
                 <JsonInspector title="Rule Result" value={ruleResult} />
               </CardContent>
@@ -388,6 +564,9 @@ export function StudioShell() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <Button onClick={runPrediction}>Run ML Prediction</Button>
+                <p className="text-xs leading-5 text-slate-400">
+                  What actually runs: TensorFlow.js if you trained a browser model; otherwise the deterministic baseline predictor. It outputs probability only.
+                </p>
                 <ConfidenceMeter label="Fire probability" value={mlResult.fireProbability} />
                 <RiskBadge level={mlResult.riskLevel} />
                 <JsonInspector title="ML Result" value={mlResult} />
@@ -401,6 +580,10 @@ export function StudioShell() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <Button onClick={runAgent}>Run Agentic Planner</Button>
+                <p className="text-xs leading-5 text-slate-400">
+                  What actually runs: OpenAI Responses API when configured; otherwise deterministic fallback. In both modes, schema validation, policy checks, approvals, trace events, and decision records still run.
+                </p>
+                <Badge>{agentProvider === "openai" ? "Live OpenAI" : agentProvider === "sample" ? "Fallback planner" : "Not run"}</Badge>
                 {agenticResult ? <JsonInspector title="Agentic Result" value={agenticResult} /> : <p className="text-sm text-slate-400">Run the planner to see proposed actions.</p>}
               </CardContent>
             </Card>
@@ -436,6 +619,7 @@ export function StudioShell() {
                   }}
                 />
                 <Button onClick={runVision}>Run Vision Model</Button>
+                <Badge>{visionProvider === "roboflow" ? "Live Roboflow" : visionProvider === "sample" ? "Sample fallback" : "Not run"}</Badge>
                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-black/30">
                   {/* eslint-disable-next-line @next/next/no-img-element -- supports user-uploaded data URLs and local demo SVGs. */}
                   <img src={uploadedImage ?? `/sample-images/${sampleName}.svg`} alt="Selected sample" className="aspect-video w-full object-cover" />
@@ -523,27 +707,39 @@ export function StudioShell() {
         </TabsContent>
 
         <TabsContent value="workflow">
-          <Card>
-            <CardHeader>
-              <GitBranch className="h-5 w-5 text-cyan-200" />
-              <CardTitle>Agentic Workflow</CardTitle>
-              <CardDescription>Logical agents are displayed as nodes even when implemented by one governed structured-output call.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[420px] overflow-hidden rounded-lg border border-white/10 bg-slate-950">
-                <ReactFlow nodes={graphNodes} edges={graphEdges} fitView>
-                  <Background />
-                  <MiniMap />
-                  <Controls />
-                </ReactFlow>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                {["Triage Agent", "Vision Context Agent", "Risk Agent", "SOP Agent", "Policy Agent", "Response Planner Agent"].map((node) => (
-                  <EdgeNodeCard key={node} title={node}>Reads evidence, emits structured reasoning, and never executes physical actions directly.</EdgeNodeCard>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid gap-4 xl:grid-cols-[1fr_.9fr]">
+            <Card>
+              <CardHeader>
+                <GitBranch className="h-5 w-5 text-cyan-200" />
+                <CardTitle>Agentic Orchestration, Not Direct Control</CardTitle>
+                <CardDescription>
+                  The model proposes structured actions. TypeScript policy, human approval, sandbox tool permissions, trace events, and decision records govern execution.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[420px] overflow-hidden rounded-lg border border-white/10 bg-slate-950">
+                  <ReactFlow nodes={graphNodes} edges={graphEdges} fitView>
+                    <Background />
+                    <MiniMap />
+                    <Controls />
+                  </ReactFlow>
+                </div>
+              </CardContent>
+            </Card>
+            <div className="grid gap-3">
+              {agentNodes.map((node) => (
+                <Card key={node.title} className="shadow-none">
+                  <CardHeader className="p-4 pb-2">
+                    <CardTitle className="text-sm">{node.title}</CardTitle>
+                    <CardDescription>{node.output}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-2 p-4 pt-0">
+                    {node.evidence.length ? node.evidence.map((item) => <Badge key={item}>{item}</Badge>) : <Badge>waiting for run</Badge>}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="tools">

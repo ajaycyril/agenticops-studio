@@ -103,6 +103,10 @@ OPENAI_MODEL=gpt-5.5
 
 If `gpt-5.5` is not available in your account, set `OPENAI_MODEL=gpt-5.4-mini` or any model your account supports.
 
+The deployed app never exposes OpenAI keys to the browser. Without `OPENAI_API_KEY`, the agent route intentionally uses a deterministic governed fallback planner so the demo still works. With `OPENAI_API_KEY`, `/api/agent/run` and `/api/agent/report` call OpenAI from server routes and validate structured JSON output before the UI accepts it.
+
+Limits and cost controls are inherited from your OpenAI account and selected model. The app keeps calls explicit: no background loop runs unless the user presses the agent/report buttons.
+
 ## Configure Roboflow
 
 ```bash
