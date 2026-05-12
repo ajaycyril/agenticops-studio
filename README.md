@@ -24,7 +24,7 @@ Physical AI connects AI systems to real-world signals and actuators. That raises
 
 ## Live Demo
 
-Vercel URL: _add after deployment_
+Vercel URL: https://agenticops-studio.vercel.app
 
 ## Architecture Diagram
 
