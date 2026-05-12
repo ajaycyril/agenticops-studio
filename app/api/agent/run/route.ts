@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       event: "response_success",
       status: "success",
       latencyMs: Date.now() - start,
-      metadata: { provider: response.provider, proposedActions: response.result.proposedActions.length }
+      metadata: { provider: response.provider, runtime: response.runtime, proposedActions: response.result.proposedActions.length }
     });
     return Response.json({ ok: true, ...response });
   } catch (error) {

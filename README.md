@@ -19,7 +19,7 @@ Physical AI connects AI systems to real-world signals and actuators. That raises
 - Agentic AI coordinates SOP, tools, policy, and human approval.
 - Enterprise agentic AI governs execution and records decisions.
 - Roboflow hosted inference runs through a server route when configured.
-- OpenAI Responses API runs through a server route when configured.
+- OpenAI Agents SDK runs through a server route when configured, with schema-validated planner output.
 - TensorFlow.js trains a real browser-side risk model.
 
 ## Live Demo
@@ -67,6 +67,17 @@ Edge AI runs perception and first-level intelligence near the device. It reduces
 
 Rule-based automation detects. ML predicts. Agentic AI coordinates. Enterprise agentic AI governs execution.
 
+The live planner route is `app/api/agent/run/route.ts`. It validates the incident payload with Zod, constructs a `Physical AI Response Planner` using `@openai/agents`, runs the agent server-side, validates the final output against `AgenticResult`, then evaluates TypeScript policy rules before the UI can show proposed actions. If OpenAI quota, model access, schema validation, or timeout fails, the route returns a deterministic governed fallback so the demo stays usable and auditable.
+
+The visible logical agents in the UI are implemented as structured sections of one governed planner run:
+
+- Triage Agent: summarizes severity and uncertainty.
+- Vision Context Agent: interprets Roboflow or sample detection confidence.
+- Risk Agent: explains the TensorFlow.js or baseline risk prediction.
+- SOP Agent: cites local SOP references.
+- Policy Agent: evaluates TypeScript guardrails.
+- Response Planner Agent: proposes actions without executing physical systems.
+
 ## Guardrails and Policy
 
 The app includes schema guardrails, policy guardrails, evidence sufficiency checks, human approval gates, tool permission checks, and physical safety constraints. Physical action tools default to sandbox mode.
@@ -99,14 +110,14 @@ Create `.env.local`:
 ```bash
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.5
-OPENAI_MAX_OUTPUT_TOKENS=700
-OPENAI_TIMEOUT_MS=12000
-OPENAI_MAX_AGENT_CALLS_PER_RUN=1
+OPENAI_MAX_OUTPUT_TOKENS=1400
+OPENAI_TIMEOUT_MS=20000
+OPENAI_MAX_AGENT_CALLS_PER_RUN=2
 ```
 
 If `gpt-5.5` is not available in your account, set `OPENAI_MODEL=gpt-5.4-mini` or any model your account supports.
 
-The deployed app never exposes OpenAI keys to the browser. Without `OPENAI_API_KEY`, the agent route intentionally uses a deterministic governed fallback planner so the demo still works. With `OPENAI_API_KEY`, `/api/agent/run` and `/api/agent/report` call OpenAI from server routes and validate structured JSON output before the UI accepts it.
+The deployed app never exposes OpenAI keys to the browser. Without `OPENAI_API_KEY`, the agent route intentionally uses a deterministic governed fallback planner so the demo still works. With `OPENAI_API_KEY`, `/api/agent/run` uses `@openai/agents` from a server route and validates structured output before the UI accepts it. `/api/agent/report` uses the OpenAI SDK from a server route.
 
 Limits and cost controls are inherited from your OpenAI account and selected model. The app keeps calls explicit: no background loop runs unless the user presses the agent/report buttons.
 Server-side hard caps are also enforced through `OPENAI_MAX_OUTPUT_TOKENS`, `OPENAI_TIMEOUT_MS`, and `OPENAI_MAX_AGENT_CALLS_PER_RUN`.
@@ -143,4 +154,11 @@ The `enterprise/` folder documents the production path: MQTT ingestion, Kafka/Ev
 
 ## Screenshots / GIFs
 
-Add screenshots for the Studio, Edge Vision Lab, ML Training Lab, Architecture page, and Decision Record viewer after deployment.
+Suggested screenshots for GitHub:
+
+- Studio control tower showing the end-to-end capability pipeline.
+- Edge Vision Lab showing sample image inference and bounding boxes.
+- ML Training Lab showing TensorFlow.js loss curve and feature importance.
+- Agentic Workflow showing custom orchestration nodes and Agent Run Console.
+- Human Approval showing approval-gated physical actions.
+- Decision Record showing the auditable JSON output.

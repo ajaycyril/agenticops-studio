@@ -1,6 +1,6 @@
-import OpenAI from "openai";
+import { Agent, run } from "@openai/agents";
 import { env, isOpenAIConfigured } from "@/lib/env";
-import { agenticJsonSchema, agenticResultSchema } from "@/lib/agent/schemas";
+import { agenticResultSchema } from "@/lib/agent/schemas";
 import { agentSystemPrompt, buildAgentUserPrompt } from "@/lib/agent/prompts";
 import { AppError } from "@/lib/errors";
 import type { AgenticResult, IncidentState, MLResult } from "@/lib/types";
@@ -14,6 +14,7 @@ type AgentControls = {
 type AgentRunResponse = {
   result: AgenticResult;
   provider: "openai" | "sample";
+  runtime: "openai-agents-sdk" | "deterministic-fallback";
   setupRequired: boolean;
   message?: string;
 };
@@ -132,133 +133,86 @@ export async function runAgenticOrchestrator(payload: unknown): Promise<AgentRun
     return {
       result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
       provider: "sample",
+      runtime: "deterministic-fallback",
       setupRequired: true,
       message: "OPENAI_API_KEY is missing. Deterministic governed fallback planner used for this run."
     };
   }
 
-  const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: env.OPENAI_TIMEOUT_MS, maxRetries: 0 });
+  const plannerAgent = new Agent({
+    name: "Physical AI Response Planner",
+    instructions: agentSystemPrompt,
+    model: env.OPENAI_MODEL,
+    modelSettings: {
+      maxTokens: env.OPENAI_MAX_OUTPUT_TOKENS,
+      store: false
+    },
+    outputType: agenticResultSchema
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.OPENAI_TIMEOUT_MS);
   try {
-    const response = await client.responses.create({
-      model: env.OPENAI_MODEL,
-      max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
-      input: [
-        { role: "system", content: agentSystemPrompt },
-        { role: "user", content: buildAgentUserPrompt(payload) }
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "AgenticResult",
-          schema: agenticJsonSchema,
-          strict: true
-        }
-      }
+    const sdkRun = await run(plannerAgent, buildAgentUserPrompt(payload), {
+      maxTurns: env.OPENAI_MAX_AGENT_CALLS_PER_RUN,
+      signal: controller.signal
     });
 
-    let firstParsed: unknown;
-    try {
-      firstParsed = JSON.parse(response.output_text);
-    } catch {
-      throw new AppError({
-        code: "AGENT_INVALID_JSON",
-        message: "OpenAI returned non-JSON content for the structured response.",
-        recoverable: true,
-        status: 502
-      });
-    }
-
-    const firstPass = agenticResultSchema.safeParse(firstParsed);
-    if (firstPass.success) return { result: firstPass.data, provider: "openai" as const, setupRequired: false };
-
-    if (env.OPENAI_MAX_AGENT_CALLS_PER_RUN < 2) {
+    const parsedOutput = agenticResultSchema.safeParse(sdkRun.finalOutput);
+    if (!parsedOutput.success) {
       throw new AppError({
         code: "AGENT_SCHEMA_VALIDATION_FAILED",
-        message: "Structured output failed schema validation. Enable one repair call by setting OPENAI_MAX_AGENT_CALLS_PER_RUN=2.",
+        message: "Agents SDK final output failed schema validation.",
         recoverable: true,
         status: 502
       });
     }
 
-    const repair = await client.responses.create({
-      model: env.OPENAI_MODEL,
-      max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
-      input: [
-        { role: "system", content: `${agentSystemPrompt}\nRepair the previous invalid JSON so it exactly matches the required schema.` },
-        { role: "user", content: response.output_text }
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "AgenticResult",
-          schema: agenticJsonSchema,
-          strict: true
-        }
-      }
-    });
-
-    let repairedParsed: unknown;
-    try {
-      repairedParsed = JSON.parse(repair.output_text);
-    } catch {
-      throw new AppError({
-        code: "AGENT_REPAIR_INVALID_JSON",
-        message: "Repair call returned invalid JSON.",
-        recoverable: true,
-        status: 502
-      });
-    }
-
-    const repaired = agenticResultSchema.safeParse(repairedParsed);
-    if (!repaired.success) {
-      throw new AppError({
-        code: "AGENT_REPAIR_SCHEMA_FAILED",
-        message: "Repair call still failed schema validation.",
-        recoverable: true,
-        status: 502
-      });
-    }
-
-    return { result: repaired.data, provider: "openai" as const, setupRequired: false };
+    return {
+      result: parsedOutput.data,
+      provider: "openai",
+      runtime: "openai-agents-sdk",
+      setupRequired: false,
+      message: "OpenAI Agents SDK planner completed with schema-validated output."
+    };
   } catch (error) {
+    const status = typeof error === "object" && error && "status" in error ? Number((error as { status?: unknown }).status) : undefined;
+    const message = error instanceof Error ? error.message : "Unknown OpenAI Agents SDK error.";
     if (error instanceof AppError && error.code.startsWith("AGENT_")) {
       return {
         result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
         provider: "sample",
+        runtime: "deterministic-fallback",
         setupRequired: false,
         message: `${error.message} Deterministic governed fallback planner used for this run.`
       };
     }
     if (error instanceof AppError) throw error;
-    if (error instanceof OpenAI.APIError) {
-      if (error.status === 429) {
-        return {
-          result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
-          provider: "sample",
-          setupRequired: false,
-          message: "OpenAI quota/rate limit reached (429). Deterministic governed fallback planner used for this run."
-        };
-      }
+    if (status === 429 || message.includes("429") || message.toLowerCase().includes("quota")) {
       return {
         result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
         provider: "sample",
+        runtime: "deterministic-fallback",
         setupRequired: false,
-        message: `OpenAI request failed (${error.status ?? "unknown"}). Deterministic governed fallback planner used for this run.`
+        message: "OpenAI quota/rate limit reached (429). Deterministic governed fallback planner used for this run."
       };
     }
-    if (error instanceof Error && error.message.toLowerCase().includes("timeout")) {
+    if (message.toLowerCase().includes("timeout") || message.toLowerCase().includes("abort")) {
       return {
         result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
         provider: "sample",
+        runtime: "deterministic-fallback",
         setupRequired: false,
-        message: "OpenAI request timed out. Deterministic governed fallback planner used for this run."
+        message: "OpenAI Agents SDK request timed out. Deterministic governed fallback planner used for this run."
       };
     }
-    throw new AppError({
-      code: "AGENT_RUN_FAILED",
-      message: error instanceof Error ? error.message : "Agent run failed unexpectedly.",
-      recoverable: true,
-      status: 500
-    });
+    return {
+      result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
+      provider: "sample",
+      runtime: "deterministic-fallback",
+      setupRequired: false,
+      message: `OpenAI Agents SDK request failed. Deterministic governed fallback planner used for this run. ${message}`
+    };
+  } finally {
+    clearTimeout(timeout);
   }
 }

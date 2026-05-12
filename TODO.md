@@ -126,3 +126,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add workflow summary cards for evidence, governance, and audit outputs
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Agentic Runtime and Documentation Upgrade
+
+- [x] Replace default React Flow boxes with custom non-empty orchestration nodes
+- [x] Add Agent Run Console with runtime, provider, latency, action count, policy count, and visible status
+- [x] Run live planner through `@openai/agents` with Zod output validation
+- [x] Preserve deterministic governed fallback for quota, timeout, and model/API errors
+- [x] Update README and architecture docs with the actual runtime boundary and UI evidence map
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production

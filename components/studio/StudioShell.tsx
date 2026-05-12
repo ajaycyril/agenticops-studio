@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type * as tf from "@tensorflow/tfjs";
-import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import { Background, Controls, Handle, MiniMap, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { motion } from "framer-motion";
 import {
@@ -112,6 +112,23 @@ type CapabilityStage = {
   action: () => void;
 };
 
+type AgentRunStatus = {
+  status: "idle" | "running" | "success" | "failed";
+  provider: "openai" | "sample" | "not-run";
+  runtime: "openai-agents-sdk" | "deterministic-fallback" | "not-run";
+  message: string;
+  latencyMs?: number;
+  actions: number;
+  policies: number;
+};
+
+type FlowNodeData = {
+  title: string;
+  detail: string;
+  status: string;
+  tone?: "cyan" | "emerald" | "amber" | "red";
+};
+
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -128,6 +145,26 @@ function statusClass(status: CapabilityStage["status"]) {
   if (status === "attention") return "border-amber-300/30 bg-amber-300/10 text-amber-100";
   if (status === "pending") return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
   return "border-white/10 bg-white/5 text-slate-300";
+}
+
+function AgenticFlowNode({ data }: NodeProps<Node<FlowNodeData>>) {
+  const toneClass =
+    data.tone === "emerald"
+      ? "border-emerald-300/40 bg-emerald-400/10"
+      : data.tone === "amber"
+        ? "border-amber-300/40 bg-amber-400/10"
+        : data.tone === "red"
+          ? "border-red-400/40 bg-red-500/10"
+          : "border-cyan-300/35 bg-cyan-400/10";
+  return (
+    <div className={`min-w-44 rounded-lg border px-3 py-2 text-left shadow-xl shadow-black/30 ${toneClass}`}>
+      <Handle type="target" position={Position.Left} className="!border-slate-950 !bg-cyan-200" />
+      <div className="text-[11px] uppercase text-slate-500">{data.status}</div>
+      <div className="mt-1 text-sm font-semibold text-slate-100">{data.title}</div>
+      <div className="mt-1 text-[11px] leading-4 text-slate-300">{data.detail}</div>
+      <Handle type="source" position={Position.Right} className="!border-slate-950 !bg-cyan-200" />
+    </div>
+  );
 }
 
 export function StudioShell() {
@@ -174,8 +211,17 @@ export function StudioShell() {
   const [activeTab, setActiveTab] = useState<StudioTab>("journey");
   const [visionRunning, setVisionRunning] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [agentRunStatus, setAgentRunStatus] = useState<AgentRunStatus>({
+    status: "idle",
+    provider: "not-run",
+    runtime: "not-run",
+    message: "Planner has not run yet. Click Run Agentic Planner or Run Guided Incident.",
+    actions: 0,
+    policies: 0
+  });
 
   const tools = useMemo(() => getToolRegistry(), []);
+  const nodeTypes = useMemo(() => ({ agentic: AgenticFlowNode }), []);
 
   useEffect(() => {
     fetch("/api/health")
@@ -325,6 +371,15 @@ export function StudioShell() {
     setAgenticResult(undefined);
     setPolicyDecisions([]);
     setDecisionRecord(undefined);
+    setAgentProvider("not-run");
+    setAgentRunStatus({
+      status: "idle",
+      provider: "not-run",
+      runtime: "not-run",
+      message: "Scenario changed. Run the planner again to generate a governed action plan.",
+      actions: 0,
+      policies: 0
+    });
     appendTrace({ type: "incident_created", actor: "system", status: "success", output: next, explanation: `Loaded ${next.scenarioName}.` });
   }
 
@@ -466,6 +521,14 @@ export function StudioShell() {
     const visionForRun = overrides.visionResult ?? visionResult;
     setAgentRunning(true);
     setMessage("Running agentic planner...");
+    setAgentRunStatus({
+      status: "running",
+      provider: "not-run",
+      runtime: "openai-agents-sdk",
+      message: "Sending incident, rule result, ML result, vision evidence, tool registry, policy summary, and runtime controls to /api/agent/run.",
+      actions: 0,
+      policies: 0
+    });
     appendTrace({ type: "agent_called", actor: "llm_agent", status: "pending", input: { incident: incidentForRun, mlResult: mlForRun, ruleResult: ruleForRun } });
     try {
       const response = await fetch("/api/agent/run", {
@@ -484,14 +547,36 @@ export function StudioShell() {
       const data = await response.json();
       if (!data.ok) {
         setMessage(`Agent step failed: ${data.error.message}`);
+        setAgentRunStatus({
+          status: "failed",
+          provider: "not-run",
+          runtime: "not-run",
+          message: data.error.message,
+          latencyMs: Math.round(performance.now() - start),
+          actions: 0,
+          policies: 0
+        });
         appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: data.error });
         return { ok: false, message: data.error.message };
       }
       const result = data.result as AgenticResult;
-      setAgentProvider(data.provider === "openai" ? "openai" : "sample");
+      const provider = data.provider === "openai" ? "openai" : "sample";
+      const runtime = data.runtime === "openai-agents-sdk" ? "openai-agents-sdk" : "deterministic-fallback";
+      setAgentProvider(provider);
       const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), incidentForRun, mlForRun);
       setAgenticResult(result);
       setPolicyDecisions(policies);
+      setAgentRunStatus({
+        status: "success",
+        provider,
+        runtime,
+        message:
+          data.message ??
+          `${runtime === "openai-agents-sdk" ? "OpenAI Agents SDK" : "Deterministic governed fallback"} produced ${result.proposedActions.length} proposed actions and ${policies.length} policy checks.`,
+        latencyMs: Math.round(performance.now() - start),
+        actions: result.proposedActions.length,
+        policies: policies.length
+      });
       if (data.provider === "sample" && data.message) {
         setMessage(data.message);
       } else {
@@ -517,6 +602,15 @@ export function StudioShell() {
     } catch (error) {
       const text = error instanceof Error ? error.message : "Agent step failed unexpectedly.";
       setMessage(`Agent step failed: ${text}`);
+      setAgentRunStatus({
+        status: "failed",
+        provider: "not-run",
+        runtime: "not-run",
+        message: text,
+        latencyMs: Math.round(performance.now() - start),
+        actions: 0,
+        policies: 0
+      });
       appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: { message: text } });
       return { ok: false, message: text };
     } finally {
@@ -643,62 +737,73 @@ export function StudioShell() {
     URL.revokeObjectURL(url);
   }
 
-  const graphNodeStyle = {
-    background: "rgba(2, 6, 23, 0.96)",
-    border: "1px solid rgba(34, 211, 238, 0.38)",
-    borderRadius: 8,
-    color: "#e0f2fe",
-    minWidth: 150,
-    boxShadow: "0 18px 36px rgba(0,0,0,0.28)"
-  };
-  const nodeLabel = (title: string, detail: string, tone = "cyan") => (
-    <div className="min-w-36 text-left">
-      <div className={tone === "emerald" ? "text-xs font-semibold text-emerald-100" : "text-xs font-semibold text-cyan-100"}>{title}</div>
-      <div className="mt-1 text-[11px] text-slate-400">{detail}</div>
-    </div>
-  );
-  const graphNodes: Node[] = [
+  const graphNodes: Node<FlowNodeData>[] = [
     {
       id: "sensors",
+      type: "agentic",
       position: { x: 0, y: 80 },
-      style: graphNodeStyle,
-      data: { label: nodeLabel("Physical sensors", `${incident.smokePpm} ppm / ${incident.temperatureC} C`) }
+      data: { title: "Physical sensors", detail: `${incident.smokePpm} ppm smoke, ${incident.temperatureC} C heat`, status: "physical signal", tone: "cyan" }
     },
     {
       id: "vision",
+      type: "agentic",
       position: { x: 210, y: 0 },
-      style: graphNodeStyle,
-      data: { label: nodeLabel("Edge vision", visionProvider === "not-run" ? "waiting for inference" : visionProvider) }
+      data: {
+        title: "Edge vision",
+        detail: visionResult ? `${visionProvider}: smoke ${pct(visionResult.maxSmokeConfidence)}, fire ${pct(visionResult.maxFireConfidence)}` : "waiting for inference",
+        status: visionRunning ? "running" : visionResult ? "evidence attached" : "not run",
+        tone: visionResult ? "emerald" : "cyan"
+      }
     },
     {
       id: "ml",
+      type: "agentic",
       position: { x: 210, y: 170 },
-      style: graphNodeStyle,
-      data: { label: nodeLabel("ML risk model", `${pct(mlResult.fireProbability)} ${mlResult.riskLevel}`) }
+      data: { title: "ML risk model", detail: `${pct(mlResult.fireProbability)} fire probability, ${mlResult.riskLevel}`, status: model ? "trained tfjs" : "baseline/tfjs-ready", tone: "amber" }
     },
     {
       id: "agent",
+      type: "agentic",
       position: { x: 440, y: 85 },
-      style: { ...graphNodeStyle, border: "1px solid rgba(16, 185, 129, 0.55)" },
-      data: { label: nodeLabel("Agentic planner", agentProvider === "not-run" ? "click run" : agentProvider, "emerald") }
+      data: {
+        title: "Agentic planner",
+        detail: agentRunStatus.status === "success" ? `${agentRunStatus.actions} proposals via ${agentRunStatus.provider}` : agentRunStatus.message,
+        status: agentRunStatus.status,
+        tone: agentRunStatus.status === "failed" ? "red" : agentRunStatus.status === "running" ? "amber" : agenticResult ? "emerald" : "cyan"
+      }
     },
     {
       id: "policy",
+      type: "agentic",
       position: { x: 700, y: 0 },
-      style: graphNodeStyle,
-      data: { label: nodeLabel("Policy guardrails", `${policyDecisions.length || "waiting"} checks`) }
+      data: {
+        title: "Policy guardrails",
+        detail: `${policyDecisions.length || 0} checks, ${policyDecisions.filter((decision) => decision.blocked).length} blocked`,
+        status: policyDecisions.length ? "evaluated" : "waiting",
+        tone: policyDecisions.some((decision) => decision.blocked) ? "red" : policyDecisions.length ? "emerald" : "cyan"
+      }
     },
     {
       id: "human",
+      type: "agentic",
       position: { x: 700, y: 170 },
-      style: graphNodeStyle,
-      data: { label: nodeLabel("Human approval", `${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} gated`) }
+      data: {
+        title: "Human approval",
+        detail: `${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} approval-gated actions`,
+        status: "operator gate",
+        tone: policyDecisions.some((decision) => decision.requiresHumanApproval) ? "amber" : "cyan"
+      }
     },
     {
       id: "tools",
+      type: "agentic",
       position: { x: 950, y: 85 },
-      style: graphNodeStyle,
-      data: { label: nodeLabel("Sandbox tools", `${agenticResult?.proposedActions.length ?? 0} proposed`) }
+      data: {
+        title: "Sandbox tools",
+        detail: `${agenticResult?.proposedActions.length ?? 0} proposed, no real dispatch`,
+        status: "controlled execution",
+        tone: agenticResult ? "emerald" : "cyan"
+      }
     }
   ];
   const graphEdges: Edge[] = [
@@ -1324,7 +1429,7 @@ export function StudioShell() {
               </CardHeader>
               <CardContent>
                 <div className="h-[420px] overflow-hidden rounded-lg border border-white/10 bg-slate-950">
-                  <ReactFlow nodes={graphNodes} edges={graphEdges} fitView>
+                  <ReactFlow nodes={graphNodes} edges={graphEdges} nodeTypes={nodeTypes} fitView>
                     <Background />
                     <MiniMap />
                     <Controls />
@@ -1347,6 +1452,42 @@ export function StudioShell() {
               </CardContent>
             </Card>
             <div className="grid gap-3">
+              <Card className="shadow-none">
+                <CardHeader className="p-4 pb-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-sm">Agent Run Console</CardTitle>
+                      <CardDescription>Visible proof of what happened when the planner ran.</CardDescription>
+                    </div>
+                    <Badge className={statusClass(agentRunStatus.status === "idle" ? "ready" : agentRunStatus.status === "running" ? "pending" : agentRunStatus.status === "success" ? "complete" : "attention")}>
+                      {agentRunStatus.status}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3 p-4 pt-0">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                      <p className="text-slate-500">Runtime</p>
+                      <p className="mt-1 font-semibold text-slate-100">{agentRunStatus.runtime}</p>
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                      <p className="text-slate-500">Agent SDK</p>
+                      <p className="mt-1 font-semibold text-slate-100">@openai/agents + Zod output guardrail</p>
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                      <p className="text-slate-500">Provider</p>
+                      <p className="mt-1 font-semibold text-slate-100">{agentRunStatus.provider}</p>
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                      <p className="text-slate-500">Output</p>
+                      <p className="mt-1 font-semibold text-slate-100">
+                        {agentRunStatus.actions} actions, {agentRunStatus.policies} policy checks{agentRunStatus.latencyMs ? `, ${agentRunStatus.latencyMs}ms` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="rounded-md border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-300">{agentRunStatus.message}</p>
+                </CardContent>
+              </Card>
               <Card className="shadow-none">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="text-sm">Agent Runtime Controls</CardTitle>
