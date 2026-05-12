@@ -144,4 +144,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Make Scenario and Physical AI tabs explain what to do next
 - [x] Add live Physical AI system map with real vs sandbox runtime markers
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
