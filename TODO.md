@@ -107,3 +107,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Upgrade vision demo samples to raster image assets and send sample payloads through `/api/vision/roboflow` for live inference
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push changes and redeploy production
+
+## CX Revamp and Planner Reliability
+
+- [x] Fix click handlers so planner, prediction, and decision record actions do not receive React events as workflow payloads
+- [x] Pass live rule, vision, ML, and agent outputs through the guided incident pipeline without stale React state
+- [x] Show agent action cards, policy status, and evidence immediately after planner execution
+- [x] Style workflow graph nodes with real runtime status instead of blank default boxes
+- [x] Make runtime controls visibly affect planner behavior and add a direct control-panel run button
+- [x] Relax OpenAI output, timeout, and repair-call caps while preserving deterministic fallback
+- [x] Re-run lint, typecheck, tests, and build

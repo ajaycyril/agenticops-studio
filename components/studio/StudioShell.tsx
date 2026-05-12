@@ -61,6 +61,19 @@ const sampleImageMap = {
 const sampleNames = Object.keys(sampleImageMap) as Array<keyof typeof sampleImageMap>;
 const studioTabs = ["journey", "scenario", "physical", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"] as const;
 type StudioTab = (typeof studioTabs)[number];
+const tabLabels: Record<StudioTab, string> = {
+  journey: "0 Runbook",
+  scenario: "1 Scenario",
+  physical: "2 Physical AI",
+  comparison: "3 Compare",
+  vision: "4 Vision",
+  ml: "5 ML",
+  workflow: "6 Agentic",
+  tools: "7 Tools",
+  approval: "8 Approval",
+  trace: "9 Trace",
+  record: "10 Record"
+};
 
 type HealthStatus = {
   status: "ok";
@@ -72,6 +85,20 @@ type HealthStatus = {
   openaiTimeoutMs: number;
   openaiMaxAgentCallsPerRun: number;
   timestamp: string;
+};
+
+type VisionRunOutcome = {
+  ok: boolean;
+  result?: VisionResult;
+  incident?: IncidentState;
+};
+
+type AgentRunOutcome = {
+  ok: boolean;
+  result?: AgenticResult;
+  policies?: PolicyDecision[];
+  provider?: "openai" | "sample";
+  message?: string;
 };
 
 function pct(value: number) {
@@ -296,6 +323,7 @@ export function StudioShell() {
     const result = evaluateRules(incident);
     setRuleResult(result);
     appendTrace({ type: "rule_engine_evaluated", actor: "system", input: incident, output: result, status: "success" });
+    return result;
   }
 
   async function trainModel() {
@@ -320,25 +348,27 @@ export function StudioShell() {
     }
   }
 
-  async function runPrediction() {
+  async function runPrediction(incidentOverride: IncidentState = incident) {
     let probability: number;
+    const features = incidentToFeatures(incidentOverride);
     if (model) {
-      const prediction = model.predict((await import("@tensorflow/tfjs")).tensor2d([incidentToFeatures(incident)])) as tf.Tensor;
+      const prediction = model.predict((await import("@tensorflow/tfjs")).tensor2d([features])) as tf.Tensor;
       probability = (await prediction.data())[0];
       prediction.dispose();
     } else {
-      probability = heuristicRiskPrediction(incident).fireProbability;
+      probability = heuristicRiskPrediction(incidentOverride).fireProbability;
     }
     const result: MLResult = {
       fireProbability: Number(probability.toFixed(3)),
       riskLevel: tunedRiskLevel(probability, decisionThreshold),
       modelVersion,
       metrics: modelMetrics,
-      featureImportance: approximateFeatureImportance(incidentToFeatures(incident)),
+      featureImportance: approximateFeatureImportance(features),
       explanation: "The ML model predicts risk only. It does not coordinate response or execute physical actions."
     };
     setMlResult(result);
-    appendTrace({ type: "ml_model_predicted", actor: "ml_model", input: incident, output: result, status: "success" });
+    appendTrace({ type: "ml_model_predicted", actor: "ml_model", input: incidentOverride, output: result, status: "success" });
+    return result;
   }
 
   async function loadSampleImageAsDataUrl(name: keyof typeof sampleImageMap) {
@@ -356,7 +386,7 @@ export function StudioShell() {
     });
   }
 
-  async function runVision() {
+  async function runVision(): Promise<VisionRunOutcome> {
     const start = performance.now();
     setVisionRunning(true);
     setMessage("Running vision inference...");
@@ -371,19 +401,20 @@ export function StudioShell() {
       if (!data.ok) {
         setMessage(`Vision step failed: ${data.error.message}`);
         appendTrace({ type: "error", actor: "vision_model", status: "failed", output: data.error });
-        return false;
+        return { ok: false };
       }
       const result = data.result as VisionResult;
-      setVisionProvider(result.provider);
-      setVisionResult(result);
-      setIncident((current) => ({
-        ...current,
+      const nextIncident: IncidentState = {
+        ...incident,
         cameraSmokeConfidence: result.maxSmokeConfidence,
         cameraFireConfidence: result.maxFireConfidence,
         visionProvider: result.provider,
         visionDetections: result.detections,
         imageUrl: uploadedImage ?? `/sample-images/${sampleImageMap[sampleName].file}`
-      }));
+      };
+      setVisionProvider(result.provider);
+      setVisionResult(result);
+      setIncident(nextIncident);
       setMessage(
         result.provider === "roboflow"
           ? `Live Roboflow inference completed in ${result.latencyMs} ms.`
@@ -398,31 +429,35 @@ export function StudioShell() {
         status: "success",
         explanation: result.message
       });
-      return true;
+      return { ok: true, result, incident: nextIncident };
     } catch (error) {
       const text = error instanceof Error ? error.message : "Vision step failed unexpectedly.";
       setMessage(`Vision step failed: ${text}`);
       appendTrace({ type: "error", actor: "vision_model", status: "failed", output: { message: text } });
-      return false;
+      return { ok: false };
     } finally {
       setVisionRunning(false);
     }
   }
 
-  async function runAgent() {
+  async function runAgent(overrides: { incident?: IncidentState; mlResult?: MLResult; ruleResult?: RuleResult; visionResult?: VisionResult } = {}): Promise<AgentRunOutcome> {
     const start = performance.now();
+    const incidentForRun = overrides.incident ?? incident;
+    const ruleForRun = overrides.ruleResult ?? ruleResult;
+    const mlForRun = overrides.mlResult ?? mlResult;
+    const visionForRun = overrides.visionResult ?? visionResult;
     setAgentRunning(true);
     setMessage("Running agentic planner...");
-    appendTrace({ type: "agent_called", actor: "llm_agent", status: "pending", input: { incident, mlResult, ruleResult } });
+    appendTrace({ type: "agent_called", actor: "llm_agent", status: "pending", input: { incident: incidentForRun, mlResult: mlForRun, ruleResult: ruleForRun } });
     try {
       const response = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          incident,
-          ruleResult,
-          mlResult,
-          visionResult,
+          incident: incidentForRun,
+          ruleResult: ruleForRun,
+          mlResult: mlForRun,
+          visionResult: visionForRun,
           toolRegistry: tools,
           policySummary: "TypeScript fire response policy evaluator v1",
           agentControls
@@ -432,11 +467,11 @@ export function StudioShell() {
       if (!data.ok) {
         setMessage(`Agent step failed: ${data.error.message}`);
         appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: data.error });
-        return false;
+        return { ok: false, message: data.error.message };
       }
       const result = data.result as AgenticResult;
       setAgentProvider(data.provider === "openai" ? "openai" : "sample");
-      const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), incident, mlResult);
+      const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), incidentForRun, mlForRun);
       setAgenticResult(result);
       setPolicyDecisions(policies);
       if (data.provider === "sample" && data.message) {
@@ -460,19 +495,21 @@ export function StudioShell() {
           status: policy.blocked ? "blocked" : policy.requiresHumanApproval ? "pending" : "success"
         })
       );
-      return true;
+      return { ok: true, result, policies, provider: data.provider, message: data.message };
     } catch (error) {
       const text = error instanceof Error ? error.message : "Agent step failed unexpectedly.";
       setMessage(`Agent step failed: ${text}`);
       appendTrace({ type: "error", actor: "llm_agent", status: "failed", output: { message: text } });
-      return false;
+      return { ok: false, message: text };
     } finally {
       setAgentRunning(false);
     }
   }
 
   async function runGuidedIncident() {
+    const ruleForRun = evaluateRules(incident);
     setMessage("Running guided incident end-to-end.");
+    setActiveTab("workflow");
     setGuidedRunStatus([
       { step: "Rule engine", status: "pending" },
       { step: "Vision inference", status: "pending" },
@@ -481,10 +518,11 @@ export function StudioShell() {
       { step: "Policy evaluation", status: "pending" },
       { step: "Decision record", status: "pending" }
     ]);
-    runRules();
+    setRuleResult(ruleForRun);
+    appendTrace({ type: "rule_engine_evaluated", actor: "system", input: incident, output: ruleForRun, status: "success" });
     setGuidedRunStatus((items) => items.map((item) => (item.step === "Rule engine" ? { ...item, status: "success" } : item)));
-    const visionOk = await runVision();
-    if (!visionOk) {
+    const visionRun = await runVision();
+    if (!visionRun.ok || !visionRun.result || !visionRun.incident) {
       setGuidedRunStatus((items) =>
         items.map((item) =>
           item.step === "Vision inference" ? { ...item, status: "failed", detail: "Check Roboflow key/model or input image format." } : item
@@ -493,10 +531,15 @@ export function StudioShell() {
       return;
     }
     setGuidedRunStatus((items) => items.map((item) => (item.step === "Vision inference" ? { ...item, status: "success" } : item)));
-    await runPrediction();
+    const mlForRun = await runPrediction(visionRun.incident);
     setGuidedRunStatus((items) => items.map((item) => (item.step === "ML prediction" ? { ...item, status: "success" } : item)));
-    const agentOk = await runAgent();
-    if (!agentOk) {
+    const agentRun = await runAgent({
+      incident: visionRun.incident,
+      mlResult: mlForRun,
+      ruleResult: ruleForRun,
+      visionResult: visionRun.result
+    });
+    if (!agentRun.ok || !agentRun.result || !agentRun.policies) {
       setGuidedRunStatus((items) =>
         items.map((item) =>
           item.step === "Agent planner"
@@ -511,9 +554,16 @@ export function StudioShell() {
         item.step === "Agent planner" || item.step === "Policy evaluation" ? { ...item, status: "success" } : item
       )
     );
-    writeDecisionRecord();
+    writeDecisionRecord({
+      incident: visionRun.incident,
+      ruleResult: ruleForRun,
+      mlResult: mlForRun,
+      visionResult: visionRun.result,
+      agenticResult: agentRun.result,
+      policyDecisions: agentRun.policies
+    });
     setGuidedRunStatus((items) => items.map((item) => (item.step === "Decision record" ? { ...item, status: "success" } : item)));
-    setMessage("Guided incident completed successfully.");
+    setMessage("Guided incident completed: vision, ML, agent plan, policy, and decision record are populated.");
   }
 
   function resolveApproval(action: "unlockGate" | "dispatchDrone" | "notifyAuthority", approved: boolean) {
@@ -529,19 +579,34 @@ export function StudioShell() {
     });
   }
 
-  function writeDecisionRecord() {
-    if (!agenticResult || !visionResult) {
+  function writeDecisionRecord(
+    overrides: {
+      incident?: IncidentState;
+      ruleResult?: RuleResult;
+      mlResult?: MLResult;
+      visionResult?: VisionResult;
+      agenticResult?: AgenticResult;
+      policyDecisions?: PolicyDecision[];
+    } = {}
+  ) {
+    const incidentForRecord = overrides.incident ?? incident;
+    const ruleForRecord = overrides.ruleResult ?? ruleResult;
+    const mlForRecord = overrides.mlResult ?? mlResult;
+    const visionForRecord = overrides.visionResult ?? visionResult;
+    const agentForRecord = overrides.agenticResult ?? agenticResult;
+    const policiesForRecord = overrides.policyDecisions ?? policyDecisions;
+    if (!agentForRecord || !visionForRecord) {
       setMessage("Run vision and agent workflow before writing the decision record.");
       return;
     }
     const record = buildDecisionRecord({
       runId: `RUN-${Date.now()}`,
-      incident,
-      ruleResult,
-      mlResult,
-      visionResult,
-      agenticResult,
-      policyDecisions,
+      incident: incidentForRecord,
+      ruleResult: ruleForRecord,
+      mlResult: mlForRecord,
+      visionResult: visionForRecord,
+      agenticResult: agentForRecord,
+      policyDecisions: policiesForRecord,
       trace
     });
     setDecisionRecord(record);
@@ -560,14 +625,57 @@ export function StudioShell() {
     URL.revokeObjectURL(url);
   }
 
+  const graphNodeStyle = {
+    background: "rgba(2, 6, 23, 0.96)",
+    border: "1px solid rgba(34, 211, 238, 0.38)",
+    borderRadius: 8,
+    color: "#e0f2fe",
+    minWidth: 150,
+    boxShadow: "0 18px 36px rgba(0,0,0,0.28)"
+  };
   const graphNodes: Node[] = [
-    { id: "sensors", position: { x: 0, y: 80 }, data: { label: "Sensors trigger" } },
-    { id: "vision", position: { x: 190, y: 0 }, data: { label: "Edge vision" } },
-    { id: "ml", position: { x: 190, y: 150 }, data: { label: "ML risk model" } },
-    { id: "agent", position: { x: 410, y: 75 }, data: { label: "Agentic control plane" } },
-    { id: "policy", position: { x: 660, y: 0 }, data: { label: "Policy guardrails" } },
-    { id: "human", position: { x: 660, y: 150 }, data: { label: "Human approval" } },
-    { id: "tools", position: { x: 900, y: 75 }, data: { label: "Sandbox tools + record" } }
+    {
+      id: "sensors",
+      position: { x: 0, y: 80 },
+      style: graphNodeStyle,
+      data: { label: `Physical sensors\n${incident.smokePpm} ppm / ${incident.temperatureC} C` }
+    },
+    {
+      id: "vision",
+      position: { x: 210, y: 0 },
+      style: graphNodeStyle,
+      data: { label: `Edge vision\n${visionProvider === "not-run" ? "waiting" : visionProvider}` }
+    },
+    {
+      id: "ml",
+      position: { x: 210, y: 170 },
+      style: graphNodeStyle,
+      data: { label: `ML risk model\n${pct(mlResult.fireProbability)} ${mlResult.riskLevel}` }
+    },
+    {
+      id: "agent",
+      position: { x: 440, y: 85 },
+      style: { ...graphNodeStyle, border: "1px solid rgba(16, 185, 129, 0.55)" },
+      data: { label: `Agentic planner\n${agentProvider === "not-run" ? "click run" : agentProvider}` }
+    },
+    {
+      id: "policy",
+      position: { x: 700, y: 0 },
+      style: graphNodeStyle,
+      data: { label: `Policy guardrails\n${policyDecisions.length || "waiting"} checks` }
+    },
+    {
+      id: "human",
+      position: { x: 700, y: 170 },
+      style: graphNodeStyle,
+      data: { label: `Human approval\n${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} gated` }
+    },
+    {
+      id: "tools",
+      position: { x: 950, y: 85 },
+      style: graphNodeStyle,
+      data: { label: `Sandbox tools\n${agenticResult?.proposedActions.length ?? 0} proposed` }
+    }
   ];
   const graphEdges: Edge[] = [
     { id: "e1", source: "sensors", target: "vision", animated: true },
@@ -621,7 +729,7 @@ export function StudioShell() {
               <div className="flex items-center gap-2 text-slate-100"><BrainCircuit className="h-4 w-4 text-amber-200" /> Browser ML</div>
               <p className="mt-1 text-xs text-slate-400">Real TensorFlow.js training runs in your browser with no server key required.</p>
             </div>
-            <Button onClick={runGuidedIncident} className="h-full min-h-16">
+            <Button onClick={() => void runGuidedIncident()} className="h-full min-h-16">
               <Route className="h-4 w-4" /> Run Guided Incident
             </Button>
           </CardContent>
@@ -663,7 +771,7 @@ export function StudioShell() {
         <TabsList>
           {studioTabs.map((tab) => (
             <TabsTrigger key={tab} value={tab}>
-              {tab}
+              {tabLabels[tab]}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -685,7 +793,7 @@ export function StudioShell() {
                       </div>
                     ))}
                   </div>
-                  <Button onClick={journey.run} className="w-full">
+                  <Button onClick={() => void journey.run()} className="w-full">
                     <Route className="h-4 w-4" /> Start Journey
                   </Button>
                 </CardContent>
@@ -812,7 +920,7 @@ export function StudioShell() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <pre className="rounded-md border border-white/10 bg-black/30 p-3 text-xs text-cyan-100">IF smoke_ppm &gt;= 70 THEN raise_alarm</pre>
-                <Button onClick={runRules}>Run Rules</Button>
+                <Button onClick={() => runRules()}>Run Rules</Button>
                 <p className="text-xs leading-5 text-slate-400">
                   What actually runs: a deterministic TypeScript rule engine in <code>lib/rule/rule-engine.ts</code>. It intentionally ignores camera, SOP, tools, and approvals.
                 </p>
@@ -827,7 +935,7 @@ export function StudioShell() {
                 <CardDescription>Predicts fire probability from fused features, but does not coordinate response.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button onClick={runPrediction}>Run ML Prediction</Button>
+                <Button onClick={() => void runPrediction()}>Run ML Prediction</Button>
                 <p className="text-xs leading-5 text-slate-400">
                   What actually runs: TensorFlow.js if you trained a browser model; otherwise the deterministic baseline predictor. It outputs probability only.
                 </p>
@@ -843,14 +951,53 @@ export function StudioShell() {
                 <CardDescription>Uses all context, SOP, tools, policy, approvals, traces, and decision records.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button onClick={runAgent} disabled={agentRunning}>
+                <Button onClick={() => void runAgent()} disabled={agentRunning}>
                   {agentRunning ? "Running Agentic Planner..." : "Run Agentic Planner"}
                 </Button>
                 <p className="text-xs leading-5 text-slate-400">
                   What actually runs: OpenAI Responses API when configured; otherwise deterministic fallback. In both modes, schema validation, policy checks, approvals, trace events, and decision records still run.
                 </p>
-                <Badge>{agentProvider === "openai" ? "Live OpenAI" : agentProvider === "sample" ? "Fallback planner" : "Not run"}</Badge>
-                {agenticResult ? <JsonInspector title="Agentic Result" value={agenticResult} /> : <p className="text-sm text-slate-400">Run the planner to see proposed actions.</p>}
+                <div className="flex flex-wrap gap-2">
+                  <Badge>{agentProvider === "openai" ? "Live OpenAI" : agentProvider === "sample" ? "Fallback planner" : "Not run"}</Badge>
+                  <Badge>{policyDecisions.length ? `${policyDecisions.length} policy checks` : "policy waiting"}</Badge>
+                </div>
+                {agenticResult ? (
+                  <div className="space-y-3">
+                    <div className="rounded-md border border-emerald-300/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-50">
+                      <p className="font-semibold">Planner output</p>
+                      <p className="mt-1">{agenticResult.incidentSummary}</p>
+                      <p className="mt-1 text-emerald-100/80">{agenticResult.riskAssessment.reason}</p>
+                    </div>
+                    {agenticResult.proposedActions.map((proposal) => {
+                      const policy = policyDecisions.find((decision) => decision.action === proposal.action);
+                      return (
+                        <div key={proposal.action} className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-slate-100">{proposal.action}</p>
+                              <p className="mt-1 leading-5 text-slate-400">{proposal.reason}</p>
+                            </div>
+                            <Badge
+                              className={
+                                policy?.blocked
+                                  ? "border-red-400/30 bg-red-500/10 text-red-100"
+                                  : policy?.requiresHumanApproval
+                                    ? "border-amber-300/30 bg-amber-300/10 text-amber-100"
+                                    : "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
+                              }
+                            >
+                              {policy?.blocked ? "blocked" : policy?.requiresHumanApproval ? "approval" : "allowed"}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-slate-500">Evidence: {proposal.evidenceUsed.join(", ")}</p>
+                        </div>
+                      );
+                    })}
+                    <JsonInspector title="Agentic Result JSON" value={agenticResult} />
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400">Run the planner to generate structured action proposals, policy checks, approval gates, and trace events.</p>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -893,7 +1040,7 @@ export function StudioShell() {
                     reader.readAsDataURL(file);
                   }}
                 />
-                <Button onClick={runVision} disabled={visionRunning}>
+                <Button onClick={() => void runVision()} disabled={visionRunning}>
                   {visionRunning ? "Running Vision Inference..." : "Run Vision Model"}
                 </Button>
                 <Badge>{visionProvider === "roboflow" ? "Live Roboflow" : visionProvider === "sample" ? "Sample fallback" : "Not run"}</Badge>
@@ -977,8 +1124,8 @@ export function StudioShell() {
                     />
                   </div>
                 ))}
-                <Button onClick={trainModel} disabled={training}>{training ? "Training..." : "Train Browser Model"}</Button>
-                <Button variant="secondary" onClick={runPrediction}>Predict Current Incident</Button>
+                <Button onClick={() => void trainModel()} disabled={training}>{training ? "Training..." : "Train Browser Model"}</Button>
+                <Button variant="secondary" onClick={() => void runPrediction()}>Predict Current Incident</Button>
                 <p className="text-xs leading-5 text-slate-400">
                   After training, prediction uses the in-memory TensorFlow.js model. Refreshing the page clears the model weights but keeps the promoted model version label in session storage.
                 </p>
@@ -1058,6 +1205,13 @@ export function StudioShell() {
                         </Button>
                       ))}
                     </div>
+                    <p className="text-xs leading-5 text-slate-500">
+                      {agentControls.operatingMode === "conservative"
+                        ? "Conservative mode asks for stronger visual evidence and more approvals."
+                        : agentControls.operatingMode === "rapid_response"
+                          ? "Rapid response mode proposes reconnaissance earlier when policy allows it."
+                          : "Balanced mode weighs sensor, vision, ML, policy, and operator direction together."}
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-slate-300">Authority posture</p>
@@ -1073,6 +1227,13 @@ export function StudioShell() {
                         </Button>
                       ))}
                     </div>
+                    <p className="text-xs leading-5 text-slate-500">
+                      {agentControls.authorityPosture === "strict"
+                        ? "Strict posture suppresses authority notification proposals unless policy leaves no safer route."
+                        : agentControls.authorityPosture === "approval_gated"
+                          ? "Approval-gated posture routes authority notification through explicit operator approval."
+                          : "Critical-only posture proposes authority notification only for critical risk."}
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-slate-300">Operator directive</p>
@@ -1087,6 +1248,9 @@ export function StudioShell() {
                       }
                     />
                   </div>
+                  <Button onClick={() => void runAgent()} disabled={agentRunning} className="w-full">
+                    {agentRunning ? "Running Planner With Controls..." : "Run Planner With These Controls"}
+                  </Button>
                 </CardContent>
               </Card>
               {agentNodes.map((node) => (
@@ -1179,8 +1343,8 @@ export function StudioShell() {
                 <CardDescription>Decision records make enterprise AI auditable: inputs, models, policy checks, approvals, executions, and traces.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button onClick={writeDecisionRecord}>Write Decision Record</Button>
-                <Button variant="secondary" onClick={downloadRecord} disabled={!decisionRecord}><Download className="h-4 w-4" /> Download JSON</Button>
+                <Button onClick={() => writeDecisionRecord()}>Write Decision Record</Button>
+                <Button variant="secondary" onClick={() => downloadRecord()} disabled={!decisionRecord}><Download className="h-4 w-4" /> Download JSON</Button>
                 {decisionRecord ? (
                   <div className="space-y-3 text-sm text-slate-300">
                     <p>{summarizeDecisionRecord(decisionRecord, "executive")}</p>

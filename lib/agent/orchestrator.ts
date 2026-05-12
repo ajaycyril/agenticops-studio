@@ -221,6 +221,14 @@ export async function runAgenticOrchestrator(payload: unknown): Promise<AgentRun
 
     return { result: repaired.data, provider: "openai" as const, setupRequired: false };
   } catch (error) {
+    if (error instanceof AppError && error.code.startsWith("AGENT_")) {
+      return {
+        result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
+        provider: "sample",
+        setupRequired: false,
+        message: `${error.message} Deterministic governed fallback planner used for this run.`
+      };
+    }
     if (error instanceof AppError) throw error;
     if (error instanceof OpenAI.APIError) {
       if (error.status === 429) {
@@ -231,20 +239,20 @@ export async function runAgenticOrchestrator(payload: unknown): Promise<AgentRun
           message: "OpenAI quota/rate limit reached (429). Deterministic governed fallback planner used for this run."
         };
       }
-      throw new AppError({
-        code: "OPENAI_API_ERROR",
-        message: `OpenAI request failed (${error.status ?? "unknown"}): ${error.message}`,
-        recoverable: true,
-        status: 502
-      });
+      return {
+        result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
+        provider: "sample",
+        setupRequired: false,
+        message: `OpenAI request failed (${error.status ?? "unknown"}). Deterministic governed fallback planner used for this run.`
+      };
     }
     if (error instanceof Error && error.message.toLowerCase().includes("timeout")) {
-      throw new AppError({
-        code: "OPENAI_TIMEOUT",
-        message: "OpenAI request timed out. Increase OPENAI_TIMEOUT_MS or reduce token budget.",
-        recoverable: true,
-        status: 504
-      });
+      return {
+        result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls),
+        provider: "sample",
+        setupRequired: false,
+        message: "OpenAI request timed out. Deterministic governed fallback planner used for this run."
+      };
     }
     throw new AppError({
       code: "AGENT_RUN_FAILED",
