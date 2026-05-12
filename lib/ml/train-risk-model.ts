@@ -13,6 +13,7 @@ export async function trainRiskModel(params: {
   size: number;
   epochs: number;
   falseAlarmBias: number;
+  learningRate: number;
   onProgress?: (point: TrainingProgress) => void;
 }) {
   await tf.ready();
@@ -22,7 +23,7 @@ export async function trainRiskModel(params: {
 
   const model = tf.sequential();
   model.add(tf.layers.dense({ inputShape: [8], units: 1, activation: "sigmoid" }));
-  model.compile({ optimizer: tf.train.adam(0.08), loss: "binaryCrossentropy", metrics: ["accuracy"] });
+  model.compile({ optimizer: tf.train.adam(params.learningRate), loss: "binaryCrossentropy", metrics: ["accuracy"] });
 
   await model.fit(xs, ys, {
     epochs: params.epochs,

@@ -89,4 +89,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add visual agent orchestration cards
 - [x] Add GitHub Actions CI workflow
 - [x] Re-run lint, typecheck, tests, and build
-- [~] Redeploy updated production app
+- [x] Redeploy updated production app
+
+## Production Depth Enhancement
+
+- [x] Add OpenAI cost guardrail environment variables and server-side caps
+- [x] Add actual browser ML tuning controls for dataset size, epochs, learning rate, false alarm bias, and decision threshold
+- [x] Add agent behavior controls that modify planner constraints per run
+- [x] Add GitHub Actions Vercel deployment workflow using repository secrets
+- [x] Re-run lint, typecheck, tests, and build
+- [~] Push and redeploy production app

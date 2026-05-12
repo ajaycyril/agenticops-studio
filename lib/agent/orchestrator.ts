@@ -4,8 +4,16 @@ import { agenticJsonSchema, agenticResultSchema } from "@/lib/agent/schemas";
 import { agentSystemPrompt, buildAgentUserPrompt } from "@/lib/agent/prompts";
 import type { AgenticResult, IncidentState, MLResult } from "@/lib/types";
 
-export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<MLResult, "fireProbability" | "riskLevel">): AgenticResult {
+type AgentControls = {
+  operatingMode?: "balanced" | "conservative" | "rapid_response";
+  authorityPosture?: "strict" | "approval_gated" | "critical_only";
+  operatorInstruction?: string;
+};
+
+export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<MLResult, "fireProbability" | "riskLevel">, controls: AgentControls = {}): AgenticResult {
   const confidence = Math.max(incident.cameraSmokeConfidence, incident.cameraFireConfidence);
+  const conservative = controls.operatingMode === "conservative";
+  const rapidResponse = controls.operatingMode === "rapid_response";
   const proposedActions: AgenticResult["proposedActions"] = [
     {
       action: mlResult.riskLevel === "low" ? "generate_report" : "notify_operator",
@@ -21,11 +29,13 @@ export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<ML
     }
   ];
 
-  if (confidence < 0.5) {
+  if (confidence < (conservative ? 0.7 : 0.5)) {
     proposedActions.unshift({
       action: "request_camera_recheck",
       riskClass: "medium",
-      reason: "Camera confidence is low, so the visual evidence should be revalidated before stronger action.",
+      reason: conservative
+        ? "Conservative operating mode requests visual revalidation unless camera confidence is strong."
+        : "Camera confidence is low, so the visual evidence should be revalidated before stronger action.",
       evidenceUsed: [`Max camera confidence ${confidence.toFixed(2)}`],
       confidence: 0.72,
       requiresPolicyCheck: true,
@@ -33,7 +43,7 @@ export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<ML
     });
   }
 
-  if (incident.droneAvailable && mlResult.riskLevel !== "low") {
+  if (incident.droneAvailable && (mlResult.riskLevel !== "low" || rapidResponse)) {
     proposedActions.push({
       action: "dispatch_drone",
       riskClass: mlResult.riskLevel,
@@ -41,7 +51,7 @@ export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<ML
       evidenceUsed: [`Risk level ${mlResult.riskLevel}`, `Drone available ${incident.droneAvailable}`, `Wind ${incident.windSpeedKmh} km/h`],
       confidence: 0.74,
       requiresPolicyCheck: true,
-      requiresHumanApproval: incident.windSpeedKmh > 25 || confidence < 0.7
+      requiresHumanApproval: conservative || incident.windSpeedKmh > 25 || confidence < 0.7
     });
   }
 
@@ -57,7 +67,7 @@ export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<ML
     });
   }
 
-  if (mlResult.riskLevel === "critical") {
+  if (mlResult.riskLevel === "critical" && controls.authorityPosture !== "strict") {
     proposedActions.push({
       action: "notify_authority",
       riskClass: "critical",
@@ -104,19 +114,20 @@ export function fallbackAgenticResult(incident: IncidentState, mlResult: Pick<ML
         : ["Confirm whether this appears to be a false alarm or needs monitoring."],
     sopReferences: ["SOP-FIRE-001", "SOP-FIRE-002", "SOP-FIRE-003", "SOP-FIRE-004"],
     explanation:
-      "The LLM is not the control system. It proposes a governed plan; policy, tool permissions, human approvals, and audit records control execution."
+      `The planner is not the control system. It proposes a governed plan; policy, tool permissions, human approvals, and audit records control execution. Operating mode: ${controls.operatingMode ?? "balanced"}. ${controls.operatorInstruction ? `Operator instruction considered: ${controls.operatorInstruction}` : ""}`
   };
 }
 
 export async function runAgenticOrchestrator(payload: unknown) {
-  const parsed = payload as { incident: IncidentState; mlResult: MLResult };
+  const parsed = payload as { incident: IncidentState; mlResult: MLResult; agentControls?: AgentControls };
   if (!isOpenAIConfigured()) {
-    return { result: fallbackAgenticResult(parsed.incident, parsed.mlResult), provider: "sample" as const, setupRequired: true };
+    return { result: fallbackAgenticResult(parsed.incident, parsed.mlResult, parsed.agentControls), provider: "sample" as const, setupRequired: true };
   }
 
-  const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: env.OPENAI_TIMEOUT_MS, maxRetries: 0 });
   const response = await client.responses.create({
     model: env.OPENAI_MODEL,
+    max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
     input: [
       { role: "system", content: agentSystemPrompt },
       { role: "user", content: buildAgentUserPrompt(payload) }
@@ -134,8 +145,13 @@ export async function runAgenticOrchestrator(payload: unknown) {
   const firstPass = agenticResultSchema.safeParse(JSON.parse(response.output_text));
   if (firstPass.success) return { result: firstPass.data, provider: "openai" as const, setupRequired: false };
 
+  if (env.OPENAI_MAX_AGENT_CALLS_PER_RUN < 2) {
+    throw new Error("OpenAI structured output failed validation and repair is disabled by OPENAI_MAX_AGENT_CALLS_PER_RUN.");
+  }
+
   const repair = await client.responses.create({
     model: env.OPENAI_MODEL,
+    max_output_tokens: env.OPENAI_MAX_OUTPUT_TOKENS,
     input: [
       { role: "system", content: `${agentSystemPrompt}\nRepair the previous invalid JSON so it exactly matches the required schema.` },
       { role: "user", content: response.output_text }

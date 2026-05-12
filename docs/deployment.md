@@ -41,4 +41,10 @@ Vercel deployment is currently handled by the linked Vercel project. To deploy f
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
-The current Vercel link is enough for normal production deploys from `main`.
+The repo now includes `.github/workflows/vercel-deploy.yml`:
+
+- Trigger: push to `main` or manual workflow dispatch.
+- Behavior: build locally in Actions, run `vercel pull`, `vercel build`, then `vercel deploy --prebuilt --prod`.
+- Guard: the deploy job runs only when all required secrets exist.
+
+The current Vercel project link still supports direct deploys from Vercel UI/CLI.

@@ -3,6 +3,9 @@ import { z } from "zod";
 const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-5.5"),
+  OPENAI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(200).max(2000).default(700),
+  OPENAI_TIMEOUT_MS: z.coerce.number().int().min(3000).max(30000).default(12000),
+  OPENAI_MAX_AGENT_CALLS_PER_RUN: z.coerce.number().int().min(1).max(2).default(1),
   ROBOFLOW_API_KEY: z.string().optional(),
   ROBOFLOW_MODEL_ID: z.string().default("fire-and-smoke-detection-hiwia/2"),
   ROBOFLOW_API_URL: z.string().url().default("https://serverless.roboflow.com"),
@@ -13,6 +16,9 @@ const envSchema = z.object({
 export const env = envSchema.parse({
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   OPENAI_MODEL: process.env.OPENAI_MODEL,
+  OPENAI_MAX_OUTPUT_TOKENS: process.env.OPENAI_MAX_OUTPUT_TOKENS,
+  OPENAI_TIMEOUT_MS: process.env.OPENAI_TIMEOUT_MS,
+  OPENAI_MAX_AGENT_CALLS_PER_RUN: process.env.OPENAI_MAX_AGENT_CALLS_PER_RUN,
   ROBOFLOW_API_KEY: process.env.ROBOFLOW_API_KEY,
   ROBOFLOW_MODEL_ID: process.env.ROBOFLOW_MODEL_ID,
   ROBOFLOW_API_URL: process.env.ROBOFLOW_API_URL,

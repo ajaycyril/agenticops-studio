@@ -41,7 +41,7 @@ import { DEFAULT_MODEL_VERSION, ENTERPRISE_LINE, PRODUCT_THESIS } from "@/lib/co
 import { incidentToFeatures } from "@/lib/ml/dataset";
 import { approximateFeatureImportance } from "@/lib/ml/feature-importance";
 import { loadModelVersion, saveModelVersion } from "@/lib/ml/model-store";
-import { heuristicRiskPrediction, riskLevelFromProbability } from "@/lib/ml/predict-risk";
+import { heuristicRiskPrediction } from "@/lib/ml/predict-risk";
 import { trainRiskModel, type TrainingProgress } from "@/lib/ml/train-risk-model";
 import { evaluatePoliciesForActions } from "@/lib/policies/policy-evaluator";
 import { evaluateRules } from "@/lib/rule/rule-engine";
@@ -57,11 +57,22 @@ type HealthStatus = {
   app: string;
   openaiConfigured: boolean;
   roboflowConfigured: boolean;
+  openaiModel: string;
+  openaiMaxOutputTokens: number;
+  openaiTimeoutMs: number;
+  openaiMaxAgentCallsPerRun: number;
   timestamp: string;
 };
 
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function tunedRiskLevel(probability: number, threshold: number) {
+  if (probability >= Math.min(0.95, threshold + 0.22)) return "critical";
+  if (probability >= threshold) return "high";
+  if (probability >= Math.max(0.2, threshold * 0.6)) return "medium";
+  return "low";
 }
 
 export function StudioShell() {
@@ -92,6 +103,16 @@ export function StudioShell() {
   const [health, setHealth] = useState<HealthStatus | undefined>();
   const [agentProvider, setAgentProvider] = useState<"openai" | "sample" | "not-run">("not-run");
   const [visionProvider, setVisionProvider] = useState<"roboflow" | "sample" | "not-run">("not-run");
+  const [trainingSize, setTrainingSize] = useState(260);
+  const [trainingEpochs, setTrainingEpochs] = useState(28);
+  const [learningRate, setLearningRate] = useState(0.08);
+  const [falseAlarmBias, setFalseAlarmBias] = useState(incident.historicalFalseAlarmRate);
+  const [decisionThreshold, setDecisionThreshold] = useState(0.62);
+  const [agentControls, setAgentControls] = useState({
+    operatingMode: "balanced" as "balanced" | "conservative" | "rapid_response",
+    authorityPosture: "critical_only" as "strict" | "approval_gated" | "critical_only",
+    operatorInstruction: "Prioritize life safety, evidence sufficiency, and no unsupervised physical action."
+  });
 
   const tools = useMemo(() => getToolRegistry(), []);
 
@@ -213,9 +234,10 @@ export function StudioShell() {
     appendTrace({ type: "ml_model_training_started", actor: "ml_model", status: "pending", input: { size: 260, epochs: 28 } });
     try {
       const trained = await trainRiskModel({
-        size: 260,
-        epochs: 28,
-        falseAlarmBias: incident.historicalFalseAlarmRate,
+        size: trainingSize,
+        epochs: trainingEpochs,
+        falseAlarmBias,
+        learningRate,
         onProgress: (point) => setLossCurve((points) => [...points.slice(-36), point])
       });
       setModel(trained.model);
@@ -239,7 +261,7 @@ export function StudioShell() {
     }
     const result: MLResult = {
       fireProbability: Number(probability.toFixed(3)),
-      riskLevel: riskLevelFromProbability(probability),
+      riskLevel: tunedRiskLevel(probability, decisionThreshold),
       modelVersion,
       metrics: modelMetrics,
       featureImportance: approximateFeatureImportance(incidentToFeatures(incident)),
@@ -296,7 +318,8 @@ export function StudioShell() {
         mlResult,
         visionResult,
         toolRegistry: tools,
-        policySummary: "TypeScript fire response policy evaluator v1"
+        policySummary: "TypeScript fire response policy evaluator v1",
+        agentControls
       })
     });
     const data = await response.json();
@@ -419,7 +442,9 @@ export function StudioShell() {
             <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm">
               <div className="flex items-center gap-2 text-slate-100"><Server className="h-4 w-4 text-cyan-200" /> OpenAI API</div>
               <p className="mt-1 text-xs text-slate-400">
-                {health?.openaiConfigured ? "Live server-side Responses API enabled." : "Fallback planner active. Add OPENAI_API_KEY in Vercel to enable live LLM calls."}
+                {health?.openaiConfigured
+                  ? `Live Responses API enabled. Model ${health.openaiModel}, max ${health.openaiMaxOutputTokens} output tokens, ${health.openaiMaxAgentCallsPerRun} call/run.`
+                  : "Fallback planner active. Add OPENAI_API_KEY in Vercel to enable live LLM calls."}
               </p>
             </div>
             <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm">
@@ -667,12 +692,44 @@ export function StudioShell() {
             <Card>
               <CardHeader>
                 <Gauge className="h-5 w-5 text-amber-200" />
-                <CardTitle>ML Training Lab</CardTitle>
-                <CardDescription>Train a real TensorFlow.js logistic model in the browser and promote the active demo model version.</CardDescription>
+                <CardTitle>ML Training Lab: Tune a Real Browser Model</CardTitle>
+                <CardDescription>
+                  This is not static scoring. These controls change the synthetic dataset, optimizer, training duration, and decision threshold used by TensorFlow.js.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {[
+                  ["trainingSize", "Training rows", trainingSize, 80, 800, 20],
+                  ["trainingEpochs", "Epochs", trainingEpochs, 5, 80, 1],
+                  ["learningRate", "Learning rate", learningRate, 0.01, 0.2, 0.01],
+                  ["falseAlarmBias", "False alarm bias", falseAlarmBias, 0, 1, 0.01],
+                  ["decisionThreshold", "High-risk threshold", decisionThreshold, 0.35, 0.9, 0.01]
+                ].map(([key, label, value, min, max, step]) => (
+                  <div key={String(key)} className="space-y-2">
+                    <div className="flex justify-between text-sm text-slate-300">
+                      <span>{label}</span>
+                      <span>{Number(value).toFixed(Number(step) < 1 ? 2 : 0)}</span>
+                    </div>
+                    <Slider
+                      value={[Number(value)]}
+                      min={Number(min)}
+                      max={Number(max)}
+                      step={Number(step)}
+                      onValueChange={([next]) => {
+                        if (key === "trainingSize") setTrainingSize(Math.round(next));
+                        if (key === "trainingEpochs") setTrainingEpochs(Math.round(next));
+                        if (key === "learningRate") setLearningRate(next);
+                        if (key === "falseAlarmBias") setFalseAlarmBias(next);
+                        if (key === "decisionThreshold") setDecisionThreshold(next);
+                      }}
+                    />
+                  </div>
+                ))}
                 <Button onClick={trainModel} disabled={training}>{training ? "Training..." : "Train Browser Model"}</Button>
                 <Button variant="secondary" onClick={runPrediction}>Predict Current Incident</Button>
+                <p className="text-xs leading-5 text-slate-400">
+                  After training, prediction uses the in-memory TensorFlow.js model. Refreshing the page clears the model weights but keeps the promoted model version label in session storage.
+                </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <MetricCard label="Model version" value={modelVersion.split(".").slice(-1)[0]} />
                   <MetricCard label="Accuracy" value={modelMetrics ? pct(modelMetrics.accuracy) : "demo"} />
@@ -727,6 +784,59 @@ export function StudioShell() {
               </CardContent>
             </Card>
             <div className="grid gap-3">
+              <Card className="shadow-none">
+                <CardHeader className="p-4 pb-2">
+                  <CardTitle className="text-sm">Agent Runtime Controls</CardTitle>
+                  <CardDescription>
+                    These controls change planner behavior per run. They are included in `/api/agent/run` payload and visible in traces.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 p-4 pt-0">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-300">Operating mode</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(["balanced", "conservative", "rapid_response"] as const).map((mode) => (
+                        <Button
+                          key={mode}
+                          size="sm"
+                          variant={agentControls.operatingMode === mode ? "default" : "secondary"}
+                          onClick={() => setAgentControls((current) => ({ ...current, operatingMode: mode }))}
+                        >
+                          {mode}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-300">Authority posture</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(["strict", "approval_gated", "critical_only"] as const).map((posture) => (
+                        <Button
+                          key={posture}
+                          size="sm"
+                          variant={agentControls.authorityPosture === posture ? "default" : "secondary"}
+                          onClick={() => setAgentControls((current) => ({ ...current, authorityPosture: posture }))}
+                        >
+                          {posture}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-300">Operator directive</p>
+                    <textarea
+                      className="min-h-20 w-full rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-200 outline-none focus:border-cyan-300/40"
+                      value={agentControls.operatorInstruction}
+                      onChange={(event) =>
+                        setAgentControls((current) => ({
+                          ...current,
+                          operatorInstruction: event.target.value.slice(0, 500)
+                        }))
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
               {agentNodes.map((node) => (
                 <Card key={node.title} className="shadow-none">
                   <CardHeader className="p-4 pb-2">

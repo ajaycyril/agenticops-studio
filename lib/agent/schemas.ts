@@ -86,6 +86,13 @@ export const incidentRequestSchema = z.object({
   }),
   visionResult: z.unknown().optional(),
   policySummary: z.string().optional(),
+  agentControls: z
+    .object({
+      operatingMode: z.enum(["balanced", "conservative", "rapid_response"]).default("balanced"),
+      authorityPosture: z.enum(["strict", "approval_gated", "critical_only"]).default("critical_only"),
+      operatorInstruction: z.string().max(500).optional()
+    })
+    .optional(),
   toolRegistry: z.unknown().optional()
 });
 
