@@ -101,6 +101,17 @@ type AgentRunOutcome = {
   message?: string;
 };
 
+type CapabilityStage = {
+  id: string;
+  title: string;
+  tab: StudioTab;
+  status: "ready" | "pending" | "complete" | "attention";
+  signal: string;
+  result: string;
+  actionLabel: string;
+  action: () => void;
+};
+
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -110,6 +121,13 @@ function tunedRiskLevel(probability: number, threshold: number) {
   if (probability >= threshold) return "high";
   if (probability >= Math.max(0.2, threshold * 0.6)) return "medium";
   return "low";
+}
+
+function statusClass(status: CapabilityStage["status"]) {
+  if (status === "complete") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
+  if (status === "attention") return "border-amber-300/30 bg-amber-300/10 text-amber-100";
+  if (status === "pending") return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
+  return "border-white/10 bg-white/5 text-slate-300";
 }
 
 export function StudioShell() {
@@ -633,48 +651,54 @@ export function StudioShell() {
     minWidth: 150,
     boxShadow: "0 18px 36px rgba(0,0,0,0.28)"
   };
+  const nodeLabel = (title: string, detail: string, tone = "cyan") => (
+    <div className="min-w-36 text-left">
+      <div className={tone === "emerald" ? "text-xs font-semibold text-emerald-100" : "text-xs font-semibold text-cyan-100"}>{title}</div>
+      <div className="mt-1 text-[11px] text-slate-400">{detail}</div>
+    </div>
+  );
   const graphNodes: Node[] = [
     {
       id: "sensors",
       position: { x: 0, y: 80 },
       style: graphNodeStyle,
-      data: { label: `Physical sensors\n${incident.smokePpm} ppm / ${incident.temperatureC} C` }
+      data: { label: nodeLabel("Physical sensors", `${incident.smokePpm} ppm / ${incident.temperatureC} C`) }
     },
     {
       id: "vision",
       position: { x: 210, y: 0 },
       style: graphNodeStyle,
-      data: { label: `Edge vision\n${visionProvider === "not-run" ? "waiting" : visionProvider}` }
+      data: { label: nodeLabel("Edge vision", visionProvider === "not-run" ? "waiting for inference" : visionProvider) }
     },
     {
       id: "ml",
       position: { x: 210, y: 170 },
       style: graphNodeStyle,
-      data: { label: `ML risk model\n${pct(mlResult.fireProbability)} ${mlResult.riskLevel}` }
+      data: { label: nodeLabel("ML risk model", `${pct(mlResult.fireProbability)} ${mlResult.riskLevel}`) }
     },
     {
       id: "agent",
       position: { x: 440, y: 85 },
       style: { ...graphNodeStyle, border: "1px solid rgba(16, 185, 129, 0.55)" },
-      data: { label: `Agentic planner\n${agentProvider === "not-run" ? "click run" : agentProvider}` }
+      data: { label: nodeLabel("Agentic planner", agentProvider === "not-run" ? "click run" : agentProvider, "emerald") }
     },
     {
       id: "policy",
       position: { x: 700, y: 0 },
       style: graphNodeStyle,
-      data: { label: `Policy guardrails\n${policyDecisions.length || "waiting"} checks` }
+      data: { label: nodeLabel("Policy guardrails", `${policyDecisions.length || "waiting"} checks`) }
     },
     {
       id: "human",
       position: { x: 700, y: 170 },
       style: graphNodeStyle,
-      data: { label: `Human approval\n${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} gated` }
+      data: { label: nodeLabel("Human approval", `${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} gated`) }
     },
     {
       id: "tools",
       position: { x: 950, y: 85 },
       style: graphNodeStyle,
-      data: { label: `Sandbox tools\n${agenticResult?.proposedActions.length ?? 0} proposed` }
+      data: { label: nodeLabel("Sandbox tools", `${agenticResult?.proposedActions.length ?? 0} proposed`) }
     }
   ];
   const graphEdges: Edge[] = [
@@ -685,6 +709,77 @@ export function StudioShell() {
     { id: "e5", source: "agent", target: "policy" },
     { id: "e6", source: "policy", target: "human" },
     { id: "e7", source: "human", target: "tools" }
+  ];
+  const capabilityStages: CapabilityStage[] = [
+    {
+      id: "scenario",
+      title: "Physical incident",
+      tab: "scenario",
+      status: "complete",
+      signal: `${incident.scenarioName}: ${incident.smokePpm} ppm smoke, ${incident.temperatureC} C heat`,
+      result: "Physical state is loaded and editable.",
+      actionLabel: "Tune scenario",
+      action: () => setActiveTab("scenario")
+    },
+    {
+      id: "vision",
+      title: "Edge vision",
+      tab: "vision",
+      status: visionRunning ? "pending" : visionResult ? "complete" : "ready",
+      signal: visionResult ? `${visionResult.provider}: smoke ${pct(visionResult.maxSmokeConfidence)}, fire ${pct(visionResult.maxFireConfidence)}` : "Camera evidence not attached yet.",
+      result: visionResult ? `${visionResult.detections.length} detections joined incident state.` : "Run the vision model to update camera confidence.",
+      actionLabel: visionRunning ? "Running..." : "Run vision",
+      action: () => {
+        setActiveTab("vision");
+        void runVision();
+      }
+    },
+    {
+      id: "ml",
+      title: "ML risk",
+      tab: "ml",
+      status: training ? "pending" : mlResult ? "complete" : "ready",
+      signal: `${pct(mlResult.fireProbability)} probability, ${mlResult.riskLevel} risk`,
+      result: model ? "Using trained TensorFlow.js model." : "Using deterministic baseline until a browser model is trained.",
+      actionLabel: "Predict risk",
+      action: () => {
+        setActiveTab("ml");
+        void runPrediction();
+      }
+    },
+    {
+      id: "agent",
+      title: "Agentic planner",
+      tab: "workflow",
+      status: agentRunning ? "pending" : agenticResult ? "complete" : "attention",
+      signal: agenticResult ? `${agentProvider} planner proposed ${agenticResult.proposedActions.length} actions` : "Planner has not produced an action plan.",
+      result: agenticResult ? agenticResult.riskAssessment.reason : "Run planner to coordinate evidence, SOP, policy, and tools.",
+      actionLabel: agentRunning ? "Running..." : "Run planner",
+      action: () => {
+        setActiveTab("workflow");
+        void runAgent();
+      }
+    },
+    {
+      id: "approval",
+      title: "Governance gates",
+      tab: "approval",
+      status: policyDecisions.some((decision) => decision.requiresHumanApproval) ? "attention" : policyDecisions.length ? "complete" : "ready",
+      signal: `${policyDecisions.length} policy checks, ${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} approvals`,
+      result: policyDecisions.length ? "Physical actions are blocked, allowed, or approval-gated." : "Policy appears after the planner proposes actions.",
+      actionLabel: "Review gates",
+      action: () => setActiveTab("approval")
+    },
+    {
+      id: "record",
+      title: "Audit record",
+      tab: "record",
+      status: decisionRecord ? "complete" : agenticResult && visionResult ? "attention" : "ready",
+      signal: decisionRecord ? decisionRecord.runId : "No decision record written.",
+      result: decisionRecord ? "Inputs, models, policy, approvals, and trace are captured." : "Write record after vision and planner run.",
+      actionLabel: "Open record",
+      action: () => setActiveTab("record")
+    }
   ];
 
   return (
@@ -767,6 +862,37 @@ export function StudioShell() {
         </Card>
       ) : null}
 
+      <Card className="shadow-none">
+        <CardHeader>
+          <CardTitle className="text-sm">End-to-End Capability Pipeline</CardTitle>
+          <CardDescription>Each stage is executable and leaves evidence in the trace, policy panel, or decision record.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {capabilityStages.map((stage, index) => (
+            <div key={stage.id} className="rounded-lg border border-white/10 bg-black/20 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] uppercase text-slate-500">Stage {index + 1}</div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(stage.tab)}
+                    className="mt-1 text-left text-sm font-semibold text-slate-100 hover:text-cyan-100"
+                  >
+                    {stage.title}
+                  </button>
+                </div>
+                <Badge className={statusClass(stage.status)}>{stage.status}</Badge>
+              </div>
+              <p className="mt-3 text-xs leading-5 text-cyan-100">{stage.signal}</p>
+              <p className="mt-1 min-h-10 text-xs leading-5 text-slate-400">{stage.result}</p>
+              <Button size="sm" variant="secondary" onClick={stage.action} className="mt-3 w-full">
+                {stage.actionLabel}
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as StudioTab)}>
         <TabsList>
           {studioTabs.map((tab) => (
@@ -830,12 +956,36 @@ export function StudioShell() {
                 <CardDescription>Adjust physical-world signals and watch deterministic rules, ML risk, and agent governance diverge.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   {scenarioPresets.map((preset, index) => (
-                    <Button key={preset.incidentId} variant="secondary" onClick={() => loadScenario(index)}>
-                      {preset.scenarioName}
-                    </Button>
+                    <button
+                      key={preset.incidentId}
+                      type="button"
+                      onClick={() => loadScenario(index)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        incident.incidentId === preset.incidentId ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-black/20 hover:border-cyan-300/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-slate-100">{preset.scenarioName}</span>
+                        <Badge>{preset.temperatureC >= 50 ? "hot" : preset.sensorHealth < 0.6 ? "degraded" : "active"}</Badge>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-slate-400">
+                        <span>{preset.smokePpm} ppm</span>
+                        <span>{preset.temperatureC} C</span>
+                        <span>{preset.droneAvailable ? "drone ready" : "no drone"}</span>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">
+                        Vision smoke {pct(preset.cameraSmokeConfidence)}, fire {pct(preset.cameraFireConfidence)}, occupancy {preset.occupancyStatus}.
+                      </p>
+                    </button>
                   ))}
+                </div>
+                <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4 text-xs leading-5 text-cyan-50">
+                  <p className="font-semibold">Selected physical state</p>
+                  <p className="mt-1">
+                    {incident.scenarioName} combines sensors, camera confidence, occupancy, drone availability, gate state, wind, and device health. Rules only use smoke and heat; ML uses fused features; agentic planning uses all context plus policy and approval state.
+                  </p>
                 </div>
                 {[
                   ["smokePpm", "Smoke ppm", 0, 140],
@@ -1179,6 +1329,20 @@ export function StudioShell() {
                     <MiniMap />
                     <Controls />
                   </ReactFlow>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                    <p className="font-semibold text-slate-100">Evidence in</p>
+                    <p className="mt-1 text-slate-400">Sensors, vision detections, ML probability, SOP references, tool state.</p>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                    <p className="font-semibold text-slate-100">Governance in path</p>
+                    <p className="mt-1 text-slate-400">Schema validation, TypeScript policy checks, approval gates, sandbox tools.</p>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
+                    <p className="font-semibold text-slate-100">Audit out</p>
+                    <p className="mt-1 text-slate-400">Trace events, proposed actions, blocked actions, approvals, decision record.</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>

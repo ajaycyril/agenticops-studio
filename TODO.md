@@ -117,3 +117,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Make runtime controls visibly affect planner behavior and add a direct control-panel run button
 - [x] Relax OpenAI output, timeout, and repair-call caps while preserving deterministic fallback
 - [x] Re-run lint, typecheck, tests, and build
+
+## Guided UX Upgrade
+
+- [x] Add end-to-end capability pipeline with stage status, signal, result, and direct action
+- [x] Make scenario presets visual and show the physical state impact before running
+- [x] Render React Flow node labels as rich visible nodes with live runtime details
+- [x] Add workflow summary cards for evidence, governance, and audit outputs
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
