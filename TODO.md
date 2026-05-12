@@ -98,4 +98,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add agent behavior controls that modify planner constraints per run
 - [x] Add GitHub Actions Vercel deployment workflow using repository secrets
 - [x] Re-run lint, typecheck, tests, and build
-- [~] Push and redeploy production app
+- [x] Push and redeploy production app
