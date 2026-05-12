@@ -172,3 +172,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Keep advanced agentic details inside the Agentic, Tools, Trace, and Record tabs
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Operator Flow Simplification
+
+- [x] Make Live Incident the default first experience
+- [x] Remove Runbook and Physical AI as competing primary tabs
+- [x] Put physical state controls and Physical AI explanation in one place
+- [x] Reduce top-of-Studio hero to a compact status and action panel
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
