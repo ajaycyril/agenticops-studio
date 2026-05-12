@@ -59,15 +59,15 @@ const sampleImageMap = {
   "unclear-camera": { file: "unclear-camera.jpg", label: "Low-confidence/unclear frame" }
 } as const;
 const sampleNames = Object.keys(sampleImageMap) as Array<keyof typeof sampleImageMap>;
-const studioTabs = ["journey", "scenario", "physical", "comparison", "vision", "ml", "workflow", "tools", "approval", "trace", "record"] as const;
+const studioTabs = ["journey", "scenario", "physical", "vision", "ml", "comparison", "workflow", "tools", "approval", "trace", "record"] as const;
 type StudioTab = (typeof studioTabs)[number];
 const tabLabels: Record<StudioTab, string> = {
   journey: "0 Runbook",
   scenario: "1 Scenario",
   physical: "2 Physical AI",
-  comparison: "3 Compare",
-  vision: "4 Vision",
-  ml: "5 ML",
+  vision: "3 Vision",
+  ml: "4 ML",
+  comparison: "5 Compare",
   workflow: "6 Agentic",
   tools: "7 Tools",
   approval: "8 Approval",
@@ -127,6 +127,14 @@ type FlowNodeData = {
   detail: string;
   status: string;
   tone?: "cyan" | "emerald" | "amber" | "red";
+};
+
+type DemoPathStep = {
+  title: string;
+  tab: StudioTab;
+  purpose: string;
+  action: string;
+  proof: string;
 };
 
 function pct(value: number) {
@@ -260,6 +268,49 @@ export function StudioShell() {
       demo: "Policy evaluator blocks or approval-gates drone, gate, and authority actions; all physical tools stay sandboxed.",
       production: "OPA/Rego, RBAC, dual approval, signed tool requests, immutable audit logs, and real command-center queues.",
       why: "Enterprise agentic AI governs execution before anything touches the physical world."
+    }
+  ];
+
+  const physicalSystemLanes = [
+    {
+      title: "Physical world",
+      runtime: "live incident state",
+      tone: "cyan",
+      summary: "The demo starts with real-world signals and actuators, not a chat prompt.",
+      items: [
+        `Smoke sensor: ${incident.smokePpm} ppm`,
+        `Heat sensor: ${incident.temperatureC} C`,
+        `Camera evidence: smoke ${pct(incident.cameraSmokeConfidence)}, fire ${pct(incident.cameraFireConfidence)}`,
+        `Occupancy: ${incident.occupancyStatus}`,
+        `Actuators: drone ${incident.droneAvailable ? "available" : "unavailable"}, gate ${incident.gateLocked ? "locked" : "already unlocked"}`
+      ]
+    },
+    {
+      title: "Edge intelligence",
+      runtime: health?.roboflowConfigured ? "Roboflow live API" : "sample fallback",
+      tone: "amber",
+      summary: "Perception happens close to the camera or through a hosted vision endpoint, then only metadata enters the workflow.",
+      items: [
+        visionResult
+          ? `Vision result: ${visionResult.detections.length} detections, ${visionResult.latencyMs}ms latency`
+          : "Vision result: not run yet",
+        `Provider: ${visionProvider}`,
+        "Evidence: bounding boxes, class labels, confidence scores",
+        "Production edge path: YOLO/ONNX on gateway with offline buffering"
+      ]
+    },
+    {
+      title: "Governed control plane",
+      runtime: agentRunStatus.runtime,
+      tone: "emerald",
+      summary: "The agent plans, but policy, approval, and sandbox tool contracts govern what can happen.",
+      items: [
+        `ML risk: ${pct(mlResult.fireProbability)} probability, ${mlResult.riskLevel}`,
+        `Agent actions: ${agenticResult?.proposedActions.length ?? 0} proposed`,
+        `Policy checks: ${policyDecisions.length}`,
+        `Approvals required: ${policyDecisions.filter((decision) => decision.requiresHumanApproval).length}`,
+        decisionRecord ? `Decision record: ${decisionRecord.runId}` : "Decision record: not written"
+      ]
     }
   ];
 
@@ -886,6 +937,57 @@ export function StudioShell() {
       action: () => setActiveTab("record")
     }
   ];
+  const demoPathSteps: DemoPathStep[] = [
+    {
+      title: "Pick the incident",
+      tab: "scenario",
+      purpose: "Start with physical-world state: smoke, heat, camera confidence, occupancy, drone, gate, wind, and sensor health.",
+      action: "Choose a scenario preset or tune values.",
+      proof: `${incident.scenarioName} is loaded.`
+    },
+    {
+      title: "Explain Physical AI",
+      tab: "physical",
+      purpose: "Show how sensors, cameras, drones, and access control become part of an AI-governed workflow.",
+      action: "Review the physical, edge, cloud, and governed execution layers.",
+      proof: "The current incident inputs map to real-world signals and actuators."
+    },
+    {
+      title: "Run edge vision",
+      tab: "vision",
+      purpose: "Attach visual evidence using Roboflow hosted inference or sample fallback.",
+      action: "Select a sample image and run vision.",
+      proof: visionResult ? `${visionResult.detections.length} detections attached.` : "Vision is waiting to run."
+    },
+    {
+      title: "Run ML risk",
+      tab: "ml",
+      purpose: "Use browser-side TensorFlow.js training and prediction to estimate fire probability.",
+      action: "Train or predict the current incident.",
+      proof: `${pct(mlResult.fireProbability)} fire probability, ${mlResult.riskLevel} risk.`
+    },
+    {
+      title: "Compare modes",
+      tab: "comparison",
+      purpose: "Make the difference clear: rules detect, ML predicts, agentic AI coordinates under governance.",
+      action: "Run rules, ML prediction, and the agentic planner.",
+      proof: agenticResult ? `${agenticResult.proposedActions.length} actions proposed.` : "Planner has not run yet."
+    },
+    {
+      title: "Run agentic control",
+      tab: "workflow",
+      purpose: "Show the agentic control plane using evidence, SOP, tools, policy, and human approval gates.",
+      action: "Run the planner and inspect the Agent Run Console.",
+      proof: agentRunStatus.status === "success" ? `${agentRunStatus.runtime} completed.` : agentRunStatus.message
+    },
+    {
+      title: "Audit the decision",
+      tab: "record",
+      purpose: "Close the enterprise loop with traceability and a decision record.",
+      action: "Review approvals, trace, and write/download the decision record.",
+      proof: decisionRecord ? `${decisionRecord.runId} written.` : "Decision record not written yet."
+    }
+  ];
 
   return (
     <div className="space-y-6">
@@ -969,6 +1071,43 @@ export function StudioShell() {
 
       <Card className="shadow-none">
         <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <Badge className="mb-3 w-fit border-amber-300/30 bg-amber-300/10 text-amber-100">Recommended live demo path</Badge>
+              <CardTitle className="text-xl">Show the journey in this order</CardTitle>
+              <CardDescription className="mt-2 max-w-3xl">
+                This runbook is the intended customer experience. It turns the demo from a collection of tabs into one governed Physical AI story.
+              </CardDescription>
+            </div>
+            <Button onClick={() => void runGuidedIncident()} className="min-h-12 lg:min-w-56">
+              <Route className="h-4 w-4" /> Run Full Guided Incident
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 lg:grid-cols-7">
+          {demoPathSteps.map((step, index) => (
+            <button
+              key={step.title}
+              type="button"
+              onClick={() => setActiveTab(step.tab)}
+              className={`rounded-lg border p-3 text-left transition ${
+                activeTab === step.tab ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-black/20 hover:border-cyan-300/40"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] uppercase text-slate-500">Step {index + 1}</span>
+                <Badge className={activeTab === step.tab ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100" : ""}>{tabLabels[step.tab].split(" ").slice(1).join(" ")}</Badge>
+              </div>
+              <p className="mt-3 text-sm font-semibold text-slate-100">{step.title}</p>
+              <p className="mt-2 min-h-16 text-xs leading-5 text-slate-400">{step.purpose}</p>
+              <p className="mt-2 text-xs leading-5 text-cyan-100">{step.proof}</p>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-none">
+        <CardHeader>
           <CardTitle className="text-sm">End-to-End Capability Pipeline</CardTitle>
           <CardDescription>Each stage is executable and leaves evidence in the trace, policy panel, or decision record.</CardDescription>
         </CardHeader>
@@ -1008,28 +1147,65 @@ export function StudioShell() {
         </TabsList>
 
         <TabsContent value="journey">
-          <div className="grid gap-4 lg:grid-cols-3">
-            {demoJourneys.map((journey) => (
-              <Card key={journey.id}>
-                <CardHeader>
-                  <journey.icon className="h-5 w-5 text-cyan-200" />
-                  <CardTitle>{journey.title}</CardTitle>
-                  <CardDescription>Customer-facing runbook with explicit steps and expected outcomes.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    {journey.steps.map((step, index) => (
-                      <div key={step} className="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
-                        {index + 1}. {step}
+          <div className="grid gap-4 xl:grid-cols-[1.1fr_.9fr]">
+            <Card>
+              <CardHeader>
+                <Route className="h-5 w-5 text-cyan-200" />
+                <CardTitle>Primary Demo Runbook</CardTitle>
+                <CardDescription>
+                  Use this path for interviews, executive demos, and architecture reviews. Each step explains what to show, what to click, and what evidence should appear.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {demoPathSteps.map((step, index) => (
+                  <div
+                    key={step.title}
+                    className={`rounded-lg border p-4 ${
+                      activeTab === step.tab ? "border-cyan-300/60 bg-cyan-400/10" : "border-white/10 bg-black/20"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="text-xs uppercase text-slate-500">Step {index + 1}</div>
+                        <h3 className="mt-1 text-base font-semibold text-slate-100">{step.title}</h3>
+                        <p className="mt-2 text-xs leading-5 text-slate-400">{step.purpose}</p>
+                        <p className="mt-2 text-xs leading-5 text-amber-100">Action: {step.action}</p>
+                        <p className="mt-1 text-xs leading-5 text-cyan-100">Proof: {step.proof}</p>
                       </div>
-                    ))}
+                      <Button size="sm" onClick={() => setActiveTab(step.tab)} className="md:min-w-36">
+                        Open {tabLabels[step.tab].split(" ").slice(1).join(" ")}
+                      </Button>
+                    </div>
                   </div>
-                  <Button onClick={() => void journey.run()} className="w-full">
-                    <Route className="h-4 w-4" /> Start Journey
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                ))}
+                <Button onClick={() => void runGuidedIncident()} className="w-full min-h-12">
+                  <PlayCircle className="h-4 w-4" /> Run the Complete Incident Now
+                </Button>
+              </CardContent>
+            </Card>
+            <div className="space-y-4">
+              {demoJourneys.map((journey) => (
+                <Card key={journey.id} className="shadow-none">
+                  <CardHeader className="p-4 pb-2">
+                    <journey.icon className="h-5 w-5 text-cyan-200" />
+                    <CardTitle className="text-base">{journey.title}</CardTitle>
+                    <CardDescription>Shortcut path for a specific audience.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 p-4 pt-0">
+                    <div className="space-y-2">
+                      {journey.steps.map((step, index) => (
+                        <div key={step} className="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+                          {index + 1}. {step}
+                        </div>
+                      ))}
+                    </div>
+                    <Button onClick={() => void journey.run()} className="w-full">
+                      <Route className="h-4 w-4" /> Start Journey
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
           <Card className="mt-4">
             <CardHeader>
@@ -1092,6 +1268,29 @@ export function StudioShell() {
                     {incident.scenarioName} combines sensors, camera confidence, occupancy, drone availability, gate state, wind, and device health. Rules only use smoke and heat; ML uses fused features; agentic planning uses all context plus policy and approval state.
                   </p>
                 </div>
+                <div className="grid gap-3 lg:grid-cols-3">
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <Badge className="border-cyan-300/30 bg-cyan-300/10 text-cyan-100">Step 1</Badge>
+                    <h3 className="mt-3 text-sm font-semibold text-slate-100">Physical AI input</h3>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      Tune smoke, heat, camera confidence, occupancy, wind, gate, and drone state. This is the simulated physical world the workflow must govern.
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <Badge className="border-amber-300/30 bg-amber-300/10 text-amber-100">Step 2</Badge>
+                    <h3 className="mt-3 text-sm font-semibold text-slate-100">Mode contrast</h3>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      Rules will detect from two fields. ML will predict from fused features. Agentic AI will coordinate evidence, tools, SOP, policy, and approvals.
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <Badge className="border-emerald-300/30 bg-emerald-300/10 text-emerald-100">Step 3</Badge>
+                    <h3 className="mt-3 text-sm font-semibold text-slate-100">Next click</h3>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      Go to Physical AI to explain the stack, then Vision and ML to generate evidence before running the agentic planner.
+                    </p>
+                  </div>
+                </div>
                 {[
                   ["smokePpm", "Smoke ppm", 0, 140],
                   ["temperatureC", "Temperature C", 10, 80],
@@ -1126,7 +1325,54 @@ export function StudioShell() {
         </TabsContent>
 
         <TabsContent value="physical">
-          <div className="grid gap-4 xl:grid-cols-[.9fr_1.1fr]">
+          <div className="space-y-4">
+            <Card className="shadow-none">
+              <CardHeader>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <Badge className="mb-3 w-fit border-cyan-300/30 bg-cyan-300/10 text-cyan-100">Physical AI system map</Badge>
+                    <CardTitle>From Real-World Signals to Governed Action</CardTitle>
+                    <CardDescription className="mt-2 max-w-3xl">
+                      This is the core Physical AI story: sensors and cameras perceive the world, edge intelligence extracts evidence, ML predicts risk, and the agentic control plane proposes actions that policy and humans govern.
+                    </CardDescription>
+                  </div>
+                  <Button onClick={() => setActiveTab("vision")} className="lg:min-w-44">
+                    <Camera className="h-4 w-4" /> Run Vision Next
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-3 lg:grid-cols-3">
+                {physicalSystemLanes.map((lane, index) => (
+                  <div
+                    key={lane.title}
+                    className={`rounded-lg border p-4 ${
+                      lane.tone === "emerald"
+                        ? "border-emerald-300/30 bg-emerald-400/10"
+                        : lane.tone === "amber"
+                          ? "border-amber-300/30 bg-amber-400/10"
+                          : "border-cyan-300/30 bg-cyan-400/10"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase text-slate-500">Layer {index + 1}</div>
+                        <h3 className="mt-1 text-base font-semibold text-slate-100">{lane.title}</h3>
+                      </div>
+                      <Badge>{lane.runtime}</Badge>
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-slate-300">{lane.summary}</p>
+                    <div className="mt-3 space-y-2">
+                      {lane.items.map((item) => (
+                        <div key={item} className="rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+            <div className="grid gap-4 xl:grid-cols-[.9fr_1.1fr]">
             <Card>
               <CardHeader>
                 <RadioTower className="h-5 w-5 text-cyan-200" />
@@ -1162,6 +1408,7 @@ export function StudioShell() {
                 <MetricCard label="Sensor health" value={pct(incident.sensorHealth)} />
               </CardContent>
             </Card>
+            </div>
           </div>
         </TabsContent>
 

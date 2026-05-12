@@ -136,3 +136,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Update README and architecture docs with the actual runtime boundary and UI evidence map
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Runbook Journey Prominence Upgrade
+
+- [x] Reorder Studio tabs around the actual demo journey
+- [x] Add a stronger step-by-step runbook and proof trail
+- [x] Make Scenario and Physical AI tabs explain what to do next
+- [x] Add live Physical AI system map with real vs sandbox runtime markers
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
