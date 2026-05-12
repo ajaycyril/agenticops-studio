@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#070b14"/>
+      <stop offset="1" stop-color="#1f1115"/>
+    </linearGradient>
+    <radialGradient id="fire" cx=".5" cy=".7">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset=".5" stop-color="#ef4444"/>
+      <stop offset="1" stop-color="#7f1d1d"/>
+    </radialGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+  <rect width="900" height="560" fill="url(#bg)"/>
+  <rect x="90" y="115" width="720" height="330" rx="18" fill="#111827"/>
+  <circle cx="460" cy="210" r="150" fill="#cbd5e1" opacity=".14" filter="url(#blur)"/>
+  <circle cx="360" cy="180" r="120" fill="#94a3b8" opacity=".12" filter="url(#blur)"/>
+  <path d="M385 430c-45-62 5-110 28-145 18 42 41 53 39 96 35-36 38-73 24-112 84 82 93 138 34 181-33 24-91 27-125-20z" fill="url(#fire)"/>
+  <rect x="170" y="350" width="560" height="35" fill="#020617" opacity=".7"/>
+  <text x="80" y="505" fill="#fee2e2" font-family="Arial" font-size="28">Sample: confirmed fire and smoke evidence</text>
+</svg>

@@ -1,0 +1,7 @@
+{
+  "provider": "sample",
+  "modelId": "fire-and-smoke-detection-hiwia/2",
+  "detections": [{ "className": "smoke", "confidence": 0.35, "x": 35, "y": 28, "width": 32, "height": 22 }],
+  "maxSmokeConfidence": 0.35,
+  "maxFireConfidence": 0.05
+}
