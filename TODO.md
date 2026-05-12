@@ -135,4 +135,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Preserve deterministic governed fallback for quota, timeout, and model/API errors
 - [x] Update README and architecture docs with the actual runtime boundary and UI evidence map
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
