@@ -163,7 +163,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Keep detailed tool contracts in the Tools tab to avoid landing-page clutter
 - [x] Keep detailed trace inspection in the Trace tab to avoid landing-page clutter
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
 
 ## Simplified UX Cleanup
 
@@ -171,4 +171,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Simplify public landing page to one clean hero and concise proof points
 - [x] Keep advanced agentic details inside the Agentic, Tools, Trace, and Record tabs
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
