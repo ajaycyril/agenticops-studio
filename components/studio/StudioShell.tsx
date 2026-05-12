@@ -151,6 +151,20 @@ type ShowcaseAct = {
   secondaryLabel?: string;
 };
 
+type PlatformSignal = {
+  label: string;
+  value: string;
+  detail: string;
+  status: CapabilityStage["status"];
+};
+
+type LifecycleStage = {
+  title: string;
+  owner: string;
+  status: CapabilityStage["status"];
+  detail: string;
+};
+
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -880,77 +894,6 @@ export function StudioShell() {
     { id: "e6", source: "policy", target: "human" },
     { id: "e7", source: "human", target: "tools" }
   ];
-  const capabilityStages: CapabilityStage[] = [
-    {
-      id: "scenario",
-      title: "Physical incident",
-      tab: "scenario",
-      status: "complete",
-      signal: `${incident.scenarioName}: ${incident.smokePpm} ppm smoke, ${incident.temperatureC} C heat`,
-      result: "Physical state is loaded and editable.",
-      actionLabel: "Tune scenario",
-      action: () => setActiveTab("scenario")
-    },
-    {
-      id: "vision",
-      title: "Edge vision",
-      tab: "vision",
-      status: visionRunning ? "pending" : visionResult ? "complete" : "ready",
-      signal: visionResult ? `${visionResult.provider}: smoke ${pct(visionResult.maxSmokeConfidence)}, fire ${pct(visionResult.maxFireConfidence)}` : "Camera evidence not attached yet.",
-      result: visionResult ? `${visionResult.detections.length} detections joined incident state.` : "Run the vision model to update camera confidence.",
-      actionLabel: visionRunning ? "Running..." : "Run vision",
-      action: () => {
-        setActiveTab("vision");
-        void runVision();
-      }
-    },
-    {
-      id: "ml",
-      title: "ML risk",
-      tab: "ml",
-      status: training ? "pending" : mlResult ? "complete" : "ready",
-      signal: `${pct(mlResult.fireProbability)} probability, ${mlResult.riskLevel} risk`,
-      result: model ? "Using trained TensorFlow.js model." : "Using deterministic baseline until a browser model is trained.",
-      actionLabel: "Predict risk",
-      action: () => {
-        setActiveTab("ml");
-        void runPrediction();
-      }
-    },
-    {
-      id: "agent",
-      title: "Agentic planner",
-      tab: "workflow",
-      status: agentRunning ? "pending" : agenticResult ? "complete" : "attention",
-      signal: agenticResult ? `${agentProvider} planner proposed ${agenticResult.proposedActions.length} actions` : "Planner has not produced an action plan.",
-      result: agenticResult ? agenticResult.riskAssessment.reason : "Run planner to coordinate evidence, SOP, policy, and tools.",
-      actionLabel: agentRunning ? "Running..." : "Run planner",
-      action: () => {
-        setActiveTab("workflow");
-        void runAgent();
-      }
-    },
-    {
-      id: "approval",
-      title: "Governance gates",
-      tab: "approval",
-      status: policyDecisions.some((decision) => decision.requiresHumanApproval) ? "attention" : policyDecisions.length ? "complete" : "ready",
-      signal: `${policyDecisions.length} policy checks, ${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} approvals`,
-      result: policyDecisions.length ? "Physical actions are blocked, allowed, or approval-gated." : "Policy appears after the planner proposes actions.",
-      actionLabel: "Review gates",
-      action: () => setActiveTab("approval")
-    },
-    {
-      id: "record",
-      title: "Audit record",
-      tab: "record",
-      status: decisionRecord ? "complete" : agenticResult && visionResult ? "attention" : "ready",
-      signal: decisionRecord ? decisionRecord.runId : "No decision record written.",
-      result: decisionRecord ? "Inputs, models, policy, approvals, and trace are captured." : "Write record after vision and planner run.",
-      actionLabel: "Open record",
-      action: () => setActiveTab("record")
-    }
-  ];
   const demoPathSteps: DemoPathStep[] = [
     {
       title: "Pick the incident",
@@ -1085,7 +1028,90 @@ export function StudioShell() {
       secondaryLabel: "Open Trace"
     }
   ];
-
+  const platformSignals: PlatformSignal[] = [
+    {
+      label: "LLM runtime",
+      value: agentRunStatus.runtime === "not-run" ? (health?.openaiConfigured ? "OpenAI ready" : "Fallback ready") : agentRunStatus.runtime,
+      detail: health?.openaiConfigured
+        ? `${health.openaiModel}, ${health.openaiMaxOutputTokens} output-token cap, ${health.openaiMaxAgentCallsPerRun} call/run`
+        : "Deterministic governed fallback keeps demos running without quota.",
+      status: agentRunStatus.status === "running" ? "pending" : health?.openaiConfigured ? "complete" : "attention"
+    },
+    {
+      label: "Schema guardrail",
+      value: "Zod validated",
+      detail: "Agent output must match AgenticResult before policy or tools consume it.",
+      status: agenticResult ? "complete" : "ready"
+    },
+    {
+      label: "Policy engine",
+      value: `${policyDecisions.length} checks`,
+      detail: `${policyDecisions.filter((decision) => decision.blocked).length} blocked, ${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} approval-gated`,
+      status: policyDecisions.length ? (policyDecisions.some((decision) => decision.requiresHumanApproval) ? "attention" : "complete") : "ready"
+    },
+    {
+      label: "Tool boundary",
+      value: `${tools.filter((tool) => tool.executionMode === "sandbox").length} sandbox`,
+      detail: "Physical tools are contract-defined and sandboxed by default.",
+      status: "complete"
+    },
+    {
+      label: "Trace events",
+      value: String(trace.length),
+      detail: "Every major run step emits structured observability data.",
+      status: trace.length > 4 ? "complete" : "ready"
+    },
+    {
+      label: "Decision record",
+      value: decisionRecord ? "written" : "not written",
+      detail: decisionRecord ? decisionRecord.runId : "Write a record after the planner runs.",
+      status: decisionRecord ? "complete" : agenticResult ? "attention" : "ready"
+    }
+  ];
+  const lifecycleStages: LifecycleStage[] = [
+    {
+      title: "Evidence fusion",
+      owner: "Triage + Vision Context",
+      status: visionResult ? "complete" : "attention",
+      detail: visionResult ? `${visionResult.detections.length} detections joined sensor state.` : "Run vision to attach camera evidence."
+    },
+    {
+      title: "Risk reasoning",
+      owner: "Risk Agent",
+      status: mlResult ? "complete" : "ready",
+      detail: `${pct(mlResult.fireProbability)} probability from ${model ? "trained TensorFlow.js model" : "baseline predictor"}.`
+    },
+    {
+      title: "Structured planning",
+      owner: "OpenAI Agents SDK",
+      status: agentRunning ? "pending" : agenticResult ? "complete" : "attention",
+      detail: agenticResult ? `${agenticResult.proposedActions.length} action proposals with evidence.` : "Run planner to create governed proposals."
+    },
+    {
+      title: "Policy evaluation",
+      owner: "TypeScript policy engine",
+      status: policyDecisions.length ? "complete" : "ready",
+      detail: policyDecisions.length ? `${policyDecisions.length} checks over proposed physical actions.` : "Policy runs after action proposals exist."
+    },
+    {
+      title: "Human approval",
+      owner: "Demo operator",
+      status: policyDecisions.some((decision) => decision.requiresHumanApproval) ? "attention" : policyDecisions.length ? "complete" : "ready",
+      detail: `${policyDecisions.filter((decision) => decision.requiresHumanApproval).length} approval-gated actions.`
+    },
+    {
+      title: "Sandbox execution",
+      owner: "Safe tool executor",
+      status: agenticResult ? "complete" : "ready",
+      detail: "Drone, gate, and authority actions remain simulated in this public deployment."
+    },
+    {
+      title: "Audit closure",
+      owner: "Decision record",
+      status: decisionRecord ? "complete" : "attention",
+      detail: decisionRecord ? `${decisionRecord.trace.length} trace events captured.` : "Write a record to close the incident."
+    }
+  ];
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
@@ -1190,11 +1216,7 @@ export function StudioShell() {
       {message ? <Alert>{message}</Alert> : null}
       {guidedRunStatus.length ? (
         <Card className="shadow-none">
-          <CardHeader>
-            <CardTitle className="text-sm">Live Execution Status</CardTitle>
-            <CardDescription>End-to-end run telemetry for the current guided incident.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          <CardContent className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-6">
             {guidedRunStatus.map((item) => (
               <div key={item.step} className="rounded-md border border-white/10 bg-black/20 p-3 text-xs">
                 <div className="flex items-center justify-between gap-3">
@@ -1217,90 +1239,6 @@ export function StudioShell() {
           </CardContent>
         </Card>
       ) : null}
-
-      <Card className="shadow-none">
-        <CardHeader>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <Badge className="mb-3 w-fit border-amber-300/30 bg-amber-300/10 text-amber-100">Live showcase control board</Badge>
-              <CardTitle className="text-xl">What to click, what runs, what proof appears</CardTitle>
-              <CardDescription className="mt-2 max-w-3xl">
-                Use these four acts when showing the app. Each act has a live action and a visible proof point so the demo does not feel like a static dashboard.
-              </CardDescription>
-            </div>
-            <Button onClick={() => void runGuidedIncident()} className="min-h-12 lg:min-w-56">
-              <Route className="h-4 w-4" /> Run Full Guided Incident
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-4 xl:grid-cols-4">
-          {showcaseActs.map((act) => {
-            const Icon = act.icon;
-            return (
-              <div
-                key={act.title}
-                className={`rounded-xl border p-4 ${activeTab === act.tab ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-black/20"}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-cyan-200" />
-                    <h3 className="text-sm font-semibold text-slate-100">{act.title}</h3>
-                  </div>
-                  <Badge className={statusClass(act.status)}>{act.status}</Badge>
-                </div>
-                <p className="mt-3 text-xs leading-5 text-slate-400">{act.liveAction}</p>
-                <p className="mt-2 min-h-12 text-xs leading-5 text-cyan-100">Proof: {act.proof}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {act.evidence.slice(0, 4).map((item) => (
-                    <Badge key={item} className="border-white/10 bg-white/5 text-slate-300">{item}</Badge>
-                  ))}
-                </div>
-                <div className="mt-4 grid gap-2">
-                  <Button size="sm" onClick={act.primaryAction}>
-                    {act.title.includes("Physical") ? "Open Scenario" : act.title.includes("Edge") ? "Run Vision" : act.title.includes("Agentic") ? "Run Planner" : "Write Record"}
-                  </Button>
-                  {act.secondaryAction ? (
-                    <Button size="sm" variant="secondary" onClick={act.secondaryAction}>
-                      {act.secondaryLabel}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-sm">End-to-End Capability Pipeline</CardTitle>
-          <CardDescription>Each stage is executable and leaves evidence in the trace, policy panel, or decision record.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {capabilityStages.map((stage, index) => (
-            <div key={stage.id} className="rounded-lg border border-white/10 bg-black/20 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase text-slate-500">Stage {index + 1}</div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab(stage.tab)}
-                    className="mt-1 text-left text-sm font-semibold text-slate-100 hover:text-cyan-100"
-                  >
-                    {stage.title}
-                  </button>
-                </div>
-                <Badge className={statusClass(stage.status)}>{stage.status}</Badge>
-              </div>
-              <p className="mt-3 text-xs leading-5 text-cyan-100">{stage.signal}</p>
-              <p className="mt-1 min-h-10 text-xs leading-5 text-slate-400">{stage.result}</p>
-              <Button size="sm" variant="secondary" onClick={stage.action} className="mt-3 w-full">
-                {stage.actionLabel}
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as StudioTab)}>
         <TabsList>
@@ -1890,6 +1828,68 @@ export function StudioShell() {
         </TabsContent>
 
         <TabsContent value="workflow">
+          <div className="space-y-4">
+            <Card className="shadow-none">
+              <CardHeader>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <Badge className="mb-3 w-fit border-emerald-300/30 bg-emerald-300/10 text-emerald-100">Agentic control plane cockpit</Badge>
+                    <CardTitle>Reasoning is only one layer of the platform</CardTitle>
+                    <CardDescription className="mt-2 max-w-4xl">
+                      A production agentic system needs runtime caps, schema validation, policy checks, approval gates, tool contracts,
+                      traces, and decision records. This cockpit shows those platform controls as live state.
+                    </CardDescription>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:min-w-96">
+                    <Button onClick={() => void runAgent()} disabled={agentRunning} className="min-h-11">
+                      <Workflow className="h-4 w-4" /> {agentRunning ? "Planner Running..." : "Run Agentic Planner"}
+                    </Button>
+                    <Button variant="secondary" onClick={() => void runGuidedIncident()} className="min-h-11">
+                      <Route className="h-4 w-4" /> Run End-to-End
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {platformSignals.map((signal) => (
+                  <div key={signal.label} className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase text-slate-500">{signal.label}</p>
+                        <p className="mt-1 text-lg font-semibold text-slate-100">{signal.value}</p>
+                      </div>
+                      <Badge className={statusClass(signal.status)}>{signal.status}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">{signal.detail}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+            <Card className="shadow-none">
+              <CardHeader>
+                <CardTitle className="text-base">Agentic Execution Lifecycle</CardTitle>
+                <CardDescription>Each step is a control boundary. The model can propose; the platform decides what may proceed.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 xl:grid-cols-7">
+                {lifecycleStages.map((stage, index) => (
+                  <motion.div
+                    key={stage.title}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.03 }}
+                    className="rounded-lg border border-white/10 bg-black/20 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[11px] uppercase text-slate-500">{index + 1}</span>
+                      <Badge className={statusClass(stage.status)}>{stage.status}</Badge>
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-slate-100">{stage.title}</p>
+                    <p className="mt-1 text-[11px] text-cyan-100">{stage.owner}</p>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">{stage.detail}</p>
+                  </motion.div>
+                ))}
+              </CardContent>
+            </Card>
           <div className="grid gap-4 xl:grid-cols-[1fr_.9fr]">
             <Card>
               <CardHeader>
@@ -2042,6 +2042,7 @@ export function StudioShell() {
                 </Card>
               ))}
             </div>
+          </div>
           </div>
         </TabsContent>
 
