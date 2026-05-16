@@ -17,6 +17,7 @@ import {
   Slider,
   Stack,
   Switch,
+  TextField,
   ThemeProvider,
   ToggleButton,
   ToggleButtonGroup,
@@ -151,6 +152,11 @@ type HealthStatus = {
   openaiMaxAgentCallsPerRun: number;
 };
 
+type AgentControls = {
+  operatingMode: "balanced" | "conservative" | "rapid_response";
+  authorityPosture: "strict" | "approval_gated" | "critical_only";
+};
+
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -237,6 +243,11 @@ export function StudioShell() {
   const [modelMetrics, setModelMetrics] = useState<MLResult["metrics"]>();
   const [sampleName, setSampleName] = useState<keyof typeof sampleImageMap>("fire-smoke-room");
   const [hasRun, setHasRun] = useState(false);
+  const [agentControls, setAgentControls] = useState<AgentControls>({
+    operatingMode: "balanced",
+    authorityPosture: "critical_only"
+  });
+  const [plannerNote, setPlannerNote] = useState("Prioritize life safety. Require approvals before any physical-world action.");
 
   const tools = useMemo(() => getToolRegistry(), []);
 
@@ -409,10 +420,8 @@ export function StudioShell() {
           toolRegistry: tools,
           policySummary: "TypeScript fire response policy evaluator v1",
           agentControls: {
-            operatingMode: "balanced",
-            authorityPosture: "critical_only",
-            operatorInstruction:
-              "Show full-stack agentic expertise: evidence fusion, tool contracts, policy guardrails, human approval gates, sandboxed physical actions, and auditability."
+            ...agentControls,
+            operatorInstruction: plannerNote
           }
         })
       });
@@ -465,6 +474,57 @@ export function StudioShell() {
     { label: "Policy engine", value: "real TypeScript evaluator", color: "success" },
     { label: "Drone/gate/authority", value: "sandbox only", color: "warning" }
   ] as const;
+
+  const postureCopy = {
+    conservative: "asks for stronger evidence and more approvals",
+    balanced: "uses normal enterprise thresholds",
+    rapid_response: "proposes faster reconnaissance when risk rises"
+  } satisfies Record<AgentControls["operatingMode"], string>;
+
+  const authorityCopy = {
+    strict: "never proposes authority notification from the planner",
+    approval_gated: "requires human approval for authority notification",
+    critical_only: "allows authority notification only at critical risk"
+  } satisfies Record<AgentControls["authorityPosture"], string>;
+
+  const flowSteps = [
+    {
+      label: "Physical signals",
+      icon: <SensorsIcon />,
+      value: `${incident.smokePpm} ppm / ${incident.temperatureC} C`,
+      status: "real state"
+    },
+    {
+      label: "Edge vision",
+      icon: <CameraAltIcon />,
+      value: visionResult ? `fire ${pct(visionResult.maxFireConfidence)}` : sampleImageMap[sampleName].label,
+      status: visionResult ? visionResult.provider : "ready"
+    },
+    {
+      label: "ML risk",
+      icon: <ModelTrainingIcon />,
+      value: `${pct(mlResult.fireProbability)} ${mlResult.riskLevel}`,
+      status: model || hasRun ? "tf.js" : "baseline"
+    },
+    {
+      label: "Agent plan",
+      icon: <AutoAwesomeIcon />,
+      value: agenticResult ? `${agenticResult.proposedActions.length} actions` : "not run",
+      status: health?.openaiConfigured ? "OpenAI/fallback" : "fallback"
+    },
+    {
+      label: "Guardrails",
+      icon: <PolicyIcon />,
+      value: policyDecisions.length ? `${blockedPolicies.length} blocked / ${gatedPolicies.length} gated` : "pending",
+      status: "real policy"
+    },
+    {
+      label: "Audit",
+      icon: <FactCheckIcon />,
+      value: decisionRecord ? decisionRecord.runId : "pending",
+      status: "local record"
+    }
+  ];
 
   const runtimeLanes = [
     {
@@ -537,17 +597,15 @@ export function StudioShell() {
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.15fr .85fr" }, gap: 3, alignItems: "stretch" }}>
             <Box>
               <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
-                <Chip icon={<ShieldIcon />} color="primary" label="Enterprise agentic AI" />
-                <Chip variant="outlined" label="Physical AI" />
-                <Chip variant="outlined" label="Edge vision" />
-                <Chip variant="outlined" label="MLOps" />
-                <Chip variant="outlined" label="Guardrails" />
+                <Chip icon={<ShieldIcon />} color="primary" label="Governed agentic AI" />
+                <Chip variant="outlined" label="Real APIs where configured" />
+                <Chip variant="outlined" label="Sandbox physical actions" />
               </Stack>
-              <Typography variant="h3" sx={{ mt: 3, maxWidth: 900 }}>
-                One incident, one run, full-stack governed AI.
+              <Typography variant="h3" sx={{ mt: 3, maxWidth: 820 }}>
+                Tune the control plane. Run the incident. Watch governance change the outcome.
               </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mt: 2, maxWidth: 860, fontSize: 18, lineHeight: 1.7 }}>
-                The point is not another chatbot. This shows how physical signals, edge perception, ML prediction, agent reasoning, policy, human approval, tool contracts, and audit records fit together.
+              <Typography variant="body1" color="text.secondary" sx={{ mt: 2, maxWidth: 760, fontSize: 17, lineHeight: 1.55 }}>
+                The useful part is the governed handoff: models reason, tools are constrained, humans approve risky actions, and every decision is recorded.
               </Typography>
               <Box sx={{ mt: 3, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 1.5 }}>
                 <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.25)" }}>
@@ -582,9 +640,6 @@ export function StudioShell() {
 
             <Paper elevation={0} sx={{ p: 2.5, bgcolor: "rgba(2, 6, 23, 0.65)", border: "1px solid rgba(34, 211, 238, 0.22)" }}>
               <Typography variant="h6">Real vs sandbox boundary</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                This is the first thing an enterprise buyer should understand.
-              </Typography>
               <Stack spacing={1.2} sx={{ mt: 2 }}>
                 {realBoundary.map((item) => (
                   <StatusChip key={item.label} label={item.label} value={item.value} color={item.color} />
@@ -697,6 +752,67 @@ export function StudioShell() {
               ))}
             </ToggleButtonGroup>
 
+            <Divider sx={{ my: 2 }} />
+
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+              <PolicyIcon color="primary" fontSize="small" />
+              <Typography variant="h6">2. Tune agent and guardrails</Typography>
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              These controls are sent into the agent route and change fallback planner behavior too.
+            </Typography>
+
+            <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
+              Agent posture
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              fullWidth
+              value={agentControls.operatingMode}
+              onChange={(_, value) => {
+                if (value) setAgentControls((current) => ({ ...current, operatingMode: value }));
+              }}
+              sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 1 }}
+            >
+              <ToggleButton value="conservative">Conservative</ToggleButton>
+              <ToggleButton value="balanced">Balanced</ToggleButton>
+              <ToggleButton value="rapid_response">Rapid response</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary">
+              {postureCopy[agentControls.operatingMode]}
+            </Typography>
+
+            <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
+              Authority guardrail
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              fullWidth
+              value={agentControls.authorityPosture}
+              onChange={(_, value) => {
+                if (value) setAgentControls((current) => ({ ...current, authorityPosture: value }));
+              }}
+              sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 1 }}
+            >
+              <ToggleButton value="strict">Strict</ToggleButton>
+              <ToggleButton value="approval_gated">Approval gated</ToggleButton>
+              <ToggleButton value="critical_only">Critical only</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary">
+              {authorityCopy[agentControls.authorityPosture]}
+            </Typography>
+
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              label="Planner instruction"
+              value={plannerNote}
+              onChange={(event) => setPlannerNote(event.target.value)}
+              sx={{ mt: 2 }}
+              slotProps={{ htmlInput: { maxLength: 500 } }}
+            />
+
             <Button
               size="large"
               variant="contained"
@@ -721,13 +837,35 @@ export function StudioShell() {
               <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
                 <TimelineIcon color="primary" />
                 <Box>
-                  <Typography variant="h5">2. Read the response chain</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    This is the actual product story: rule detects, ML predicts, agentic governance coordinates action.
-                  </Typography>
+              <Typography variant="h5">3. Runtime flow</Typography>
+              <Typography variant="body2" color="text.secondary">
+                    Follow the handoff from real-world signal to governed action proposal.
+              </Typography>
                 </Box>
               </Stack>
-              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(3, 1fr)" }, gap: 2 }}>
+              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(6, 1fr)" }, gap: 1.25 }}>
+                {flowSteps.map((step) => (
+                  <Paper key={step.label} elevation={0} sx={{ p: 1.5, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
+                    <Stack direction="row" spacing={1} sx={{ alignItems: "center", color: "primary.main" }}>
+                      {step.icon}
+                      <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 800 }}>
+                        {step.status}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="subtitle2" sx={{ mt: 1, fontWeight: 900 }}>
+                      {step.label}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>
+                      {step.value}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Box>
+
+              <Typography variant="h6" sx={{ mt: 2.5 }}>
+                Difference in response
+              </Typography>
+              <Box sx={{ mt: 1, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(3, 1fr)" }, gap: 2 }}>
                 <Paper elevation={0} sx={{ p: 2, border: "1px solid rgba(245, 158, 11, 0.25)", bgcolor: "rgba(245, 158, 11, 0.08)" }}>
                   <Chip size="small" color="warning" label="Rule engine" />
                   <Typography variant="h6" sx={{ mt: 1 }}>
@@ -784,7 +922,7 @@ export function StudioShell() {
                     p: 2,
                     bgcolor: "rgba(15, 23, 42, 0.88)",
                     border: "1px solid rgba(148, 163, 184, 0.18)",
-                    minHeight: 260
+                    minHeight: 190
                   }}
                 >
                   <Stack direction="row" spacing={1} sx={{ alignItems: "center", color: "primary.main" }}>
@@ -794,9 +932,6 @@ export function StudioShell() {
                     </Typography>
                   </Stack>
                   <Chip size="small" label={lane.status} sx={{ mt: 1 }} color={lane.title === "Guardrails" ? "warning" : "default"} />
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, minHeight: 64 }}>
-                    {lane.summary}
-                  </Typography>
                   <Divider sx={{ my: 1.5 }} />
                   {lane.lines.map(([label, value]) => (
                     <EvidenceLine key={label} label={label} value={value} />

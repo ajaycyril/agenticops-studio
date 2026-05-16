@@ -210,3 +210,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Make the primary action and resulting outputs obvious on desktop and mobile
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Control Plane Tuning UX Refactor
+
+- [x] Add visible agent posture and authority guardrail tuning controls
+- [x] Pass tuning controls into the live/fallback agentic planner
+- [x] Replace dense explanation blocks with a compact runtime flow
+- [x] Keep real vs sandbox status visible above the run
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
