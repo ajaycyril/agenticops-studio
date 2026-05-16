@@ -227,4 +227,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Show planner provider, runtime, latency, and fallback reason in the UI
 - [x] Add logical agent workbench outputs for triage, vision, risk, policy, and response planning
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
