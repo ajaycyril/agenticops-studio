@@ -200,4 +200,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Label what is real, fallback, and sandboxed in the UI
 - [x] Hide technical JSON behind an optional details section
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
