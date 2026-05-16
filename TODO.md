@@ -247,3 +247,11 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Show proposed tools, guardrail outcome, sandbox boundary, and audit record
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Dynamic Agentic Reasoning Demo
+
+- [x] Add animated stage transitions and live reasoning trace
+- [x] Make the agentic distinction explicit across fire, unclear-camera, and false-alarm scenarios
+- [x] Show rule-only, ML-only, and agentic reasoning differences during the live run
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production

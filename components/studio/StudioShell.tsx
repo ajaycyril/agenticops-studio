@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type * as tf from "@tensorflow/tfjs";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Alert,
   Box,
@@ -95,6 +96,11 @@ type Phase = {
   result: string;
 };
 
+type ReasoningEntry = {
+  stage: string;
+  text: string;
+};
+
 const initialPhases: Phase[] = [
   {
     id: "observe",
@@ -142,6 +148,27 @@ const initialPhases: Phase[] = [
     result: "Waiting for run."
   }
 ];
+
+const scenarioLessons = {
+  "fire-smoke-room": {
+    title: "Confirmed fire",
+    rule: "Rules raise an alarm from smoke and heat.",
+    ml: "ML predicts high fire probability.",
+    agentic: "Agentic AI coordinates operator, drone, gate access, authority posture, policy gates, and an audit record."
+  },
+  "unclear-camera": {
+    title: "Unclear camera",
+    rule: "Rules still react to smoke and heat.",
+    ml: "ML gives risk, but uncertainty remains.",
+    agentic: "Agentic AI reasons about missing confidence first: recheck camera, avoid unsafe physical action, preserve human review."
+  },
+  "cooking-smoke": {
+    title: "False alarm",
+    rule: "Rules can over-trigger on smoke.",
+    ml: "ML can lower probability using context.",
+    agentic: "Agentic AI avoids unnecessary dispatch, explains why, records the decision, and keeps operator visibility."
+  }
+} satisfies Record<keyof typeof sampleImageMap, { title: string; rule: string; ml: string; agentic: string }>;
 
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -203,9 +230,13 @@ export function StudioShell() {
     createTraceEvent({ type: "incident_created", actor: "system", status: "success", output: clonePreset(1) })
   ]);
   const [runtime, setRuntime] = useState<{ provider?: string; runtime?: string; latencyMs?: number; message?: string }>({});
+  const [reasoningLog, setReasoningLog] = useState<ReasoningEntry[]>([
+    { stage: "Start", text: "Choose a scenario, then run the demo. The reasoning trace will update live." }
+  ]);
 
   const tools = useMemo(() => getToolRegistry(), []);
   const selectedPhase = phases.find((phase) => phase.id === activePhase) ?? phases[0];
+  const selectedLesson = scenarioLessons[sampleName];
   const blockedPolicies = policyDecisions.filter((policy) => policy.blocked);
   const gatedPolicies = policyDecisions.filter((policy) => policy.requiresHumanApproval && !policy.blocked);
 
@@ -235,6 +266,10 @@ export function StudioShell() {
     );
   }
 
+  function addReasoning(stage: string, text: string) {
+    setReasoningLog((current) => [...current, { stage, text }].slice(-6));
+  }
+
   function loadDemo(kind: keyof typeof sampleImageMap) {
     const presetIndex = kind === "cooking-smoke" ? 0 : kind === "unclear-camera" ? 2 : 1;
     const next = clonePreset(presetIndex);
@@ -247,6 +282,7 @@ export function StudioShell() {
     setPolicyDecisions([]);
     setDecisionRecord(undefined);
     setRuntime({});
+    setReasoningLog([{ stage: "Scenario", text: `${scenarioLessons[kind].title}: ${scenarioLessons[kind].agentic}` }]);
     setPhases(initialPhases);
     setActivePhase("observe");
     setMessage("Press Run. The story will explain what each layer did.");
@@ -321,9 +357,11 @@ export function StudioShell() {
     setAgenticResult(undefined);
     setDecisionRecord(undefined);
     setRuntime({});
+    setReasoningLog([{ stage: "Scenario", text: `${selectedLesson.title}: ${selectedLesson.agentic}` }]);
 
     try {
       updatePhase("observe", "running", "Reading physical signals and camera evidence...");
+      addReasoning("Observe", `Physical evidence: smoke ${incident.smokePpm} ppm, heat ${incident.temperatureC} C, camera frame ${selectedLesson.title}.`);
       await sleep(500);
       const rule = evaluateRules(incident);
       setRuleResult(rule);
@@ -335,8 +373,10 @@ export function StudioShell() {
         `Signals say ${rule.severity}; vision says fire ${pct(vision.result.maxFireConfidence)}, smoke ${pct(vision.result.maxSmokeConfidence)}.`,
         "This is Physical AI: the workflow starts from real-world signals, not a chat prompt."
       );
+      addReasoning("Rule", `${selectedLesson.rule} Output: ${formatAction(rule.action)}. Rule logic cannot inspect SOP, uncertainty, tools, or approvals.`);
 
       updatePhase("predict", "running", "Training/scoring a browser ML risk model...");
+      addReasoning("ML", "The ML layer estimates probability from fused features. It still cannot choose a governed response.");
       await sleep(450);
       const trained = model
         ? undefined
@@ -354,8 +394,10 @@ export function StudioShell() {
         `ML predicts ${pct(ml.fireProbability)} fire probability (${ml.riskLevel}).`,
         "This is not yet agentic. ML gives a probability; it does not decide which tools to call."
       );
+      addReasoning("Prediction", `${selectedLesson.ml} Probability: ${pct(ml.fireProbability)}. The output is a score, not an execution plan.`);
 
       updatePhase("reason", "running", `${health?.openaiConfigured ? "Calling OpenAI Agents SDK" : "Using fallback planner"} to propose a plan...`);
+      addReasoning("Agent", "Now the agent reasons across evidence, ML risk, tool contracts, SOP posture, and the selected guardrail mode.");
       await sleep(350);
       appendTrace({ type: "agent_called", actor: "llm_agent", input: { incidentId: vision.nextIncident.incidentId }, status: "pending" });
       const started = Date.now();
@@ -389,8 +431,10 @@ export function StudioShell() {
         `Agent proposed ${agent.proposedActions.length} tool calls using ${data.runtime}.`,
         "This is the agentic part: the planner converts evidence and a goal into a structured action plan."
       );
+      addReasoning("Agent plan", `${selectedLesson.agentic} Proposed: ${agent.proposedActions.map((proposal) => formatAction(proposal.action)).join(", ")}.`);
 
       updatePhase("guard", "running", "Checking whether the proposed tool calls are allowed...");
+      addReasoning("Guardrails", "The model has proposed actions. Policy now decides whether each action is allowed, blocked, or approval-gated.");
       await sleep(450);
       const policies = evaluatePoliciesForActions(agent.proposedActions.map((proposal) => proposal.action), vision.nextIncident, ml);
       setPolicyDecisions(policies);
@@ -400,8 +444,10 @@ export function StudioShell() {
         `${policies.filter((policy) => policy.blocked).length} blocked, ${policies.filter((policy) => policy.requiresHumanApproval && !policy.blocked).length} require approval.`,
         "This is enterprise agentic AI: the model reasons, but policy constrains and humans approve risky execution."
       );
+      addReasoning("Policy", `${policies.length} tool checks completed: ${policies.filter((policy) => policy.blocked).length} blocked, ${policies.filter((policy) => policy.requiresHumanApproval && !policy.blocked).length} approval-gated.`);
 
       updatePhase("act", "running", "Writing decision record. Physical actions remain sandboxed...");
+      addReasoning("Audit", "The workflow records the incident, model output, agent proposal, policy decisions, and sandbox boundary.");
       await sleep(450);
       const validatedEvent = appendTrace({ type: "agent_output_validated", actor: "llm_agent", output: agent, status: "success", explanation: data.message });
       const policyEvent = appendTrace({ type: "policy_checked", actor: "policy", output: policies, status: "success" });
@@ -424,6 +470,7 @@ export function StudioShell() {
         `Decision record ${record.runId} written. Drone/gate/authority actions are sandboxed.`,
         "This is production readiness: every proposed action, approval gate, model result, and policy decision is auditable."
       );
+      addReasoning("Done", `Decision record ${record.runId} written. This is the enterprise difference: reasoning plus governance plus audit.`);
       setMessage("Done. The center panel explains the agentic handoff; the right panel shows the governed tool plan.");
     } catch (error) {
       const text = error instanceof Error ? error.message : "Run failed.";
@@ -529,54 +576,99 @@ export function StudioShell() {
               <Typography variant="body2" sx={{ mt: 0.75 }}>Smoke {incident.smokePpm} ppm</Typography>
               <Typography variant="body2">Heat {incident.temperatureC} C</Typography>
               <Typography variant="body2">Camera frame: {sampleImageMap[sampleName].label}</Typography>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="caption" color="text.secondary">Why this scenario shows agentic AI</Typography>
+              <Typography variant="body2" sx={{ mt: 0.75, color: "warning.main" }}>{selectedLesson.rule}</Typography>
+              <Typography variant="body2" sx={{ mt: 0.75, color: "secondary.main" }}>{selectedLesson.ml}</Typography>
+              <Typography variant="body2" sx={{ mt: 0.75, color: "primary.main" }}>{selectedLesson.agentic}</Typography>
             </Paper>
 
             <Box sx={{ display: "grid", gap: 2 }}>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(5, 1fr)" }, gap: 1 }}>
                 {phases.map((phase) => (
-                  <Paper
+                  <motion.div
                     key={phase.id}
-                    component="button"
-                    onClick={() => setActivePhase(phase.id)}
-                    elevation={0}
-                    sx={{
-                      p: 1.4,
-                      textAlign: "left",
-                      minHeight: 128,
-                      cursor: "pointer",
-                      color: "text.primary",
-                      bgcolor: activePhase === phase.id ? "rgba(34, 211, 238, 0.15)" : "rgba(2, 6, 23, 0.55)",
-                      border: activePhase === phase.id ? "1px solid rgba(34, 211, 238, 0.65)" : "1px solid rgba(148, 163, 184, 0.16)"
+                    animate={{
+                      y: phase.status === "running" ? [0, -4, 0] : 0,
+                      scale: activePhase === phase.id ? 1.02 : 1
                     }}
+                    transition={{ duration: 0.55, repeat: phase.status === "running" ? Infinity : 0 }}
                   >
-                    <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                      <Typography variant="caption" color="text.secondary">{phase.verb}</Typography>
-                      <Chip size="small" color={phaseColor(phase.status)} label={phase.status} />
-                    </Stack>
-                    <Typography variant="h6" sx={{ mt: 1 }}>{phase.label}</Typography>
-                    <Typography variant="caption" color="text.secondary">{phase.result}</Typography>
-                  </Paper>
+                    <Paper
+                      component="button"
+                      onClick={() => setActivePhase(phase.id)}
+                      elevation={0}
+                      sx={{
+                        width: "100%",
+                        p: 1.4,
+                        textAlign: "left",
+                        minHeight: 128,
+                        cursor: "pointer",
+                        color: "text.primary",
+                        bgcolor: activePhase === phase.id ? "rgba(34, 211, 238, 0.15)" : "rgba(2, 6, 23, 0.55)",
+                        border: activePhase === phase.id ? "1px solid rgba(34, 211, 238, 0.65)" : "1px solid rgba(148, 163, 184, 0.16)"
+                      }}
+                    >
+                      <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                        <Typography variant="caption" color="text.secondary">{phase.verb}</Typography>
+                        <Chip size="small" color={phaseColor(phase.status)} label={phase.status} />
+                      </Stack>
+                      <Typography variant="h6" sx={{ mt: 1 }}>{phase.label}</Typography>
+                      <Typography variant="caption" color="text.secondary">{phase.result}</Typography>
+                    </Paper>
+                  </motion.div>
                 ))}
               </Box>
 
               <Paper elevation={0} sx={{ p: 2.5, bgcolor: "rgba(2, 6, 23, 0.56)", border: "1px solid rgba(34, 211, 238, 0.2)", minHeight: 270 }}>
-                <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
-                  <Box sx={{ color: "primary.main" }}>
-                    {selectedPhase.id === "observe" ? <SensorsIcon /> : selectedPhase.id === "predict" ? <PsychologyIcon /> : selectedPhase.id === "reason" ? <AutoAwesomeIcon /> : selectedPhase.id === "guard" ? <GppMaybeIcon /> : <CheckCircleIcon />}
-                  </Box>
-                  <Typography variant="h5">{selectedPhase.headline}</Typography>
-                </Stack>
-                <Typography variant="body1" sx={{ mt: 2, lineHeight: 1.65 }}>
-                  {selectedPhase.explanation}
-                </Typography>
-                <Alert severity={selectedPhase.status === "blocked" ? "warning" : "info"} sx={{ mt: 2 }}>
-                  {selectedPhase.result}
-                </Alert>
-                {runtime.message && selectedPhase.id === "reason" ? (
-                  <Alert severity={runtime.provider === "openai" ? "success" : "warning"} sx={{ mt: 1 }}>
-                    {runtime.message}
-                  </Alert>
-                ) : null}
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={selectedPhase.id}
+                    initial={{ opacity: 0, x: 18 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -18 }}
+                    transition={{ duration: 0.22 }}
+                  >
+                    <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
+                      <Box sx={{ color: "primary.main" }}>
+                        {selectedPhase.id === "observe" ? <SensorsIcon /> : selectedPhase.id === "predict" ? <PsychologyIcon /> : selectedPhase.id === "reason" ? <AutoAwesomeIcon /> : selectedPhase.id === "guard" ? <GppMaybeIcon /> : <CheckCircleIcon />}
+                      </Box>
+                      <Typography variant="h5">{selectedPhase.headline}</Typography>
+                    </Stack>
+                    <Typography variant="body1" sx={{ mt: 2, lineHeight: 1.65 }}>
+                      {selectedPhase.explanation}
+                    </Typography>
+                    <Alert severity={selectedPhase.status === "blocked" ? "warning" : "info"} sx={{ mt: 2 }}>
+                      {selectedPhase.result}
+                    </Alert>
+                    {runtime.message && selectedPhase.id === "reason" ? (
+                      <Alert severity={runtime.provider === "openai" ? "success" : "warning"} sx={{ mt: 1 }}>
+                        {runtime.message}
+                      </Alert>
+                    ) : null}
+                  </motion.div>
+                </AnimatePresence>
+
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="h6">Live reasoning trace</Typography>
+                <Box sx={{ mt: 1, display: "grid", gap: 1 }}>
+                  <AnimatePresence initial={false}>
+                    {reasoningLog.map((entry, index) => (
+                      <motion.div
+                        key={`${entry.stage}-${index}-${entry.text}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <Paper elevation={0} sx={{ p: 1.1, bgcolor: "rgba(15, 23, 42, 0.72)", border: "1px solid rgba(148, 163, 184, 0.14)" }}>
+                          <Typography variant="caption" sx={{ color: "primary.main", fontWeight: 900 }}>{entry.stage}</Typography>
+                          <Typography variant="body2" color="text.secondary">{entry.text}</Typography>
+                        </Paper>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </Box>
               </Paper>
 
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1 }}>
