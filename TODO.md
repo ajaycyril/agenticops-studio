@@ -218,4 +218,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Replace dense explanation blocks with a compact runtime flow
 - [x] Keep real vs sandbox status visible above the run
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
