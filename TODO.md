@@ -236,4 +236,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Remove incident tuning sliders and reduce nested card/detail layers
 - [x] Make each stage clickable with plain-language explanation
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
