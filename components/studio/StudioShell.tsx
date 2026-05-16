@@ -157,6 +157,24 @@ type AgentControls = {
   authorityPosture: "strict" | "approval_gated" | "critical_only";
 };
 
+type RunStepStatus = "waiting" | "running" | "done" | "fallback" | "failed";
+
+type RunStep = {
+  id: "rules" | "ml" | "vision" | "agent" | "policy" | "audit";
+  title: string;
+  detail: string;
+  status: RunStepStatus;
+};
+
+const initialRunSteps: RunStep[] = [
+  { id: "rules", title: "Rule engine", detail: "Waiting for run", status: "waiting" },
+  { id: "ml", title: "Browser ML", detail: "Waiting for run", status: "waiting" },
+  { id: "vision", title: "Edge vision API", detail: "Waiting for run", status: "waiting" },
+  { id: "agent", title: "OpenAI agent planner", detail: "Waiting for run", status: "waiting" },
+  { id: "policy", title: "Guardrail evaluator", detail: "Waiting for run", status: "waiting" },
+  { id: "audit", title: "Decision record", detail: "Waiting for run", status: "waiting" }
+];
+
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -217,6 +235,14 @@ function EvidenceLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+function stepColor(status: RunStepStatus): "default" | "primary" | "success" | "warning" | "error" | "info" {
+  if (status === "running") return "primary";
+  if (status === "done") return "success";
+  if (status === "fallback") return "warning";
+  if (status === "failed") return "error";
+  return "default";
+}
+
 export function StudioShell() {
   const [incident, setIncident] = useState<IncidentState>(() => clonePreset(1));
   const [ruleResult, setRuleResult] = useState<RuleResult>(() => evaluateRules(clonePreset(1)));
@@ -248,6 +274,14 @@ export function StudioShell() {
     authorityPosture: "critical_only"
   });
   const [plannerNote, setPlannerNote] = useState("Prioritize life safety. Require approvals before any physical-world action.");
+  const [runSteps, setRunSteps] = useState<RunStep[]>(initialRunSteps);
+  const [agentRuntime, setAgentRuntime] = useState<{
+    provider?: string;
+    runtime?: string;
+    message?: string;
+    startedAt?: number;
+    latencyMs?: number;
+  }>({});
 
   const tools = useMemo(() => getToolRegistry(), []);
 
@@ -268,12 +302,18 @@ export function StudioShell() {
     return created;
   }
 
+  function updateRunStep(id: RunStep["id"], status: RunStepStatus, detail: string) {
+    setRunSteps((current) => current.map((step) => (step.id === id ? { ...step, status, detail } : step)));
+  }
+
   function resetRunState() {
     setVisionResult(undefined);
     setAgenticResult(undefined);
     setPolicyDecisions([]);
     setDecisionRecord(undefined);
     setHasRun(false);
+    setRunSteps(initialRunSteps);
+    setAgentRuntime({});
   }
 
   function loadScenario(index: number) {
@@ -395,20 +435,34 @@ export function StudioShell() {
 
   async function runComparison() {
     setRunning(true);
-    setMessage("Running the governed full-stack incident workflow...");
+    setRunSteps(initialRunSteps);
+    setAgentRuntime({ startedAt: Date.now() });
+    setMessage("Live run started. Watch the execution console update stage by stage.");
     try {
       const incidentForRun = incident;
+      updateRunStep("rules", "running", "Evaluating deterministic smoke/heat thresholds.");
       const rule = runRules(incidentForRun);
+      updateRunStep("rules", "done", `${formatAction(rule.action)} at ${rule.severity} severity.`);
+
+      updateRunStep("ml", "running", model ? "Using the active TensorFlow.js model." : "Training a TensorFlow.js model in this browser.");
       const trained = model ? undefined : await trainBrowserModel(incidentForRun);
+      updateRunStep("ml", "running", "Scoring the incident with the active model.");
+      
+      updateRunStep("vision", "running", `Sending ${sampleImageMap[sampleName].label} through the server-side vision route.`);
       const vision = await runVision(incidentForRun);
+      updateRunStep("vision", vision.result.provider === "sample" ? "fallback" : "done", `${vision.result.provider} inference: fire ${pct(vision.result.maxFireConfidence)}, smoke ${pct(vision.result.maxSmokeConfidence)}.`);
+
       const ml = await runPrediction(
         vision.nextIncident,
         trained?.model ?? model,
         trained?.modelVersion ?? modelVersion,
         trained?.metrics ?? modelMetrics
       );
+      updateRunStep("ml", "done", `${pct(ml.fireProbability)} fire probability, ${ml.riskLevel} risk.`);
 
+      updateRunStep("agent", "running", `${health?.openaiConfigured ? "Calling OpenAI Agents SDK" : "Using deterministic fallback"} with ${agentControls.operatingMode} posture.`);
       appendTrace({ type: "agent_called", actor: "llm_agent", input: { incidentId: vision.nextIncident.incidentId }, status: "pending" });
+      const agentStart = Date.now();
       const response = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -429,9 +483,27 @@ export function StudioShell() {
       if (!data.ok) throw new Error(data.error.message);
 
       const result = data.result as AgenticResult;
+      const agentLatencyMs = Date.now() - agentStart;
+      setAgentRuntime({
+        provider: data.provider,
+        runtime: data.runtime,
+        message: data.message,
+        startedAt: agentStart,
+        latencyMs: agentLatencyMs
+      });
+      updateRunStep(
+        "agent",
+        data.provider === "openai" ? "done" : "fallback",
+        `${data.runtime}: ${result.proposedActions.length} actions proposed in ${(agentLatencyMs / 1000).toFixed(1)}s.`
+      );
+
+      updateRunStep("policy", "running", "Checking tool permissions, approval gates, and physical-safety policy.");
       const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), vision.nextIncident, ml);
+      updateRunStep("policy", "done", `${policies.length} checks, ${policies.filter((policy) => policy.blocked).length} blocked, ${policies.filter((policy) => policy.requiresHumanApproval && !policy.blocked).length} approval-gated.`);
       const validatedEvent = appendTrace({ type: "agent_output_validated", actor: "llm_agent", output: result, status: "success", explanation: data.message });
       const policyEvent = appendTrace({ type: "policy_checked", actor: "policy", output: policies, status: "success" });
+
+      updateRunStep("audit", "running", "Writing local/session decision record with trace and governance metadata.");
       const record = buildDecisionRecord({
         runId: `RUN-${Date.now()}`,
         incident: vision.nextIncident,
@@ -449,10 +521,14 @@ export function StudioShell() {
       setHasRun(true);
       sessionStorage.setItem("agenticops.latestDecisionRecord", JSON.stringify(record));
       appendTrace({ type: "decision_record_written", actor: "system", output: { runId: record.runId }, status: "success" });
-      setMessage("Run complete. The lanes below show what was real, what was sandboxed, and what the agent proposed.");
+      updateRunStep("audit", "done", `Decision record ${record.runId} written.`);
+      setMessage("Run complete. The execution console shows the live stages; the agent workbench shows the planner output.");
     } catch (error) {
       const text = error instanceof Error ? error.message : "Run failed.";
       setMessage(text);
+      setRunSteps((current) =>
+        current.map((step) => (step.status === "running" ? { ...step, status: "failed", detail: text } : step))
+      );
       appendTrace({ type: "error", actor: "system", output: { message: text }, status: "failed" });
     } finally {
       setRunning(false);
@@ -523,6 +599,34 @@ export function StudioShell() {
       icon: <FactCheckIcon />,
       value: decisionRecord ? decisionRecord.runId : "pending",
       status: "local record"
+    }
+  ];
+
+  const agentWorkProducts = [
+    {
+      agent: "Triage Agent",
+      output: agenticResult?.incidentSummary ?? "Waiting for run",
+      proof: agenticResult ? agenticResult.riskAssessment.evidence.slice(0, 2).join(" | ") : "Summarizes severity and gaps."
+    },
+    {
+      agent: "Vision Context Agent",
+      output: visionResult ? `${visionResult.provider} saw fire ${pct(visionResult.maxFireConfidence)} and smoke ${pct(visionResult.maxSmokeConfidence)}.` : "Waiting for vision result",
+      proof: `Frame: ${sampleImageMap[sampleName].label}`
+    },
+    {
+      agent: "Risk Agent",
+      output: `${pct(mlResult.fireProbability)} fire probability, ${mlResult.riskLevel} risk.`,
+      proof: topFeature ? `Top feature: ${topFeature.feature}` : "Uses browser ML result."
+    },
+    {
+      agent: "Policy Agent",
+      output: policyDecisions.length ? `${blockedPolicies.length} blocked, ${gatedPolicies.length} approval-gated.` : "Waiting for policy checks",
+      proof: `${agentControls.authorityPosture} authority posture; ${agentControls.operatingMode} operating mode.`
+    },
+    {
+      agent: "Response Planner Agent",
+      output: agenticResult ? `${agenticResult.proposedActions.map((action) => formatAction(action.action)).join(", ")}` : "Waiting for structured action plan",
+      proof: agentRuntime.runtime ? `${agentRuntime.runtime}${agentRuntime.latencyMs ? ` in ${(agentRuntime.latencyMs / 1000).toFixed(1)}s` : ""}` : "OpenAI Agents SDK or deterministic fallback."
     }
   ];
 
@@ -833,6 +937,54 @@ export function StudioShell() {
           </Surface>
 
           <Box sx={{ display: "grid", gap: 2 }}>
+            <Surface sx={{ borderColor: running ? "rgba(34, 211, 238, 0.5)" : "rgba(148, 163, 184, 0.18)" }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between" }}>
+                <Box>
+                  <Typography variant="h5">Live execution console</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    This is what happens when you click run. Each stage updates as the client calls local code and server routes.
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
+                  <Chip color={agentRuntime.provider === "openai" ? "success" : agentRuntime.provider ? "warning" : "default"} label={agentRuntime.provider ? `planner: ${agentRuntime.provider}` : "planner: waiting"} />
+                  <Chip color={agentRuntime.runtime?.includes("openai") ? "success" : agentRuntime.runtime ? "warning" : "default"} label={agentRuntime.runtime ?? "runtime pending"} />
+                  <Chip label={agentRuntime.latencyMs ? `${(agentRuntime.latencyMs / 1000).toFixed(1)}s` : "latency pending"} />
+                </Stack>
+              </Stack>
+              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)", xl: "repeat(6, 1fr)" }, gap: 1.25 }}>
+                {runSteps.map((step, index) => (
+                  <Paper
+                    key={step.id}
+                    elevation={0}
+                    sx={{
+                      p: 1.5,
+                      bgcolor: step.status === "running" ? "rgba(34, 211, 238, 0.12)" : "rgba(2, 6, 23, 0.58)",
+                      border: step.status === "running" ? "1px solid rgba(34, 211, 238, 0.48)" : "1px solid rgba(148, 163, 184, 0.16)",
+                      minHeight: 138
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 900 }}>
+                        {String(index + 1).padStart(2, "0")}
+                      </Typography>
+                      <Chip size="small" color={stepColor(step.status)} label={step.status} />
+                    </Stack>
+                    <Typography variant="subtitle2" sx={{ mt: 1, fontWeight: 900 }}>
+                      {step.title}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75, lineHeight: 1.45 }}>
+                      {step.detail}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Box>
+              {agentRuntime.message ? (
+                <Alert severity={agentRuntime.provider === "openai" ? "success" : "warning"} sx={{ mt: 2 }}>
+                  {agentRuntime.message}
+                </Alert>
+              ) : null}
+            </Surface>
+
             <Surface>
               <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
                 <TimelineIcon color="primary" />
@@ -939,6 +1091,34 @@ export function StudioShell() {
                 </Paper>
               ))}
             </Box>
+
+            <Surface>
+              <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
+                <AutoAwesomeIcon color="primary" />
+                <Box>
+                  <Typography variant="h5">Agentic workbench</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Same run, shown as logical agents. This is the control-plane reasoning layer, not a chatbot.
+                  </Typography>
+                </Box>
+              </Stack>
+              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(5, 1fr)" }, gap: 1.5 }}>
+                {agentWorkProducts.map((item) => (
+                  <Paper key={item.agent} elevation={0} sx={{ p: 1.75, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(34, 211, 238, 0.16)", minHeight: 176 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 900, color: "primary.main" }}>
+                      {item.agent}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1, lineHeight: 1.5 }}>
+                      {item.output}
+                    </Typography>
+                    <Divider sx={{ my: 1.25 }} />
+                    <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>
+                      {item.proof}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Box>
+            </Surface>
 
             <Surface>
               <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between" }}>

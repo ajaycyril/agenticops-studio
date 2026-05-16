@@ -3,9 +3,9 @@ import { z } from "zod";
 const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-5.5"),
-  OPENAI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(200).max(4000).default(1400),
-  OPENAI_TIMEOUT_MS: z.coerce.number().int().min(3000).max(45000).default(20000),
-  OPENAI_MAX_AGENT_CALLS_PER_RUN: z.coerce.number().int().min(1).max(2).default(2),
+  OPENAI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(200).max(6000).default(3200),
+  OPENAI_TIMEOUT_MS: z.coerce.number().int().min(3000).max(60000).default(45000),
+  OPENAI_MAX_AGENT_CALLS_PER_RUN: z.coerce.number().int().min(1).max(6).default(4),
   ROBOFLOW_API_KEY: z.string().optional(),
   ROBOFLOW_MODEL_ID: z.string().default("fire-and-smoke-detection-hiwia/2"),
   ROBOFLOW_API_URL: z.string().url().default("https://serverless.roboflow.com"),

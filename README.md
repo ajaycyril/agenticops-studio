@@ -110,9 +110,9 @@ Create `.env.local`:
 ```bash
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.5
-OPENAI_MAX_OUTPUT_TOKENS=1400
-OPENAI_TIMEOUT_MS=20000
-OPENAI_MAX_AGENT_CALLS_PER_RUN=2
+OPENAI_MAX_OUTPUT_TOKENS=3200
+OPENAI_TIMEOUT_MS=45000
+OPENAI_MAX_AGENT_CALLS_PER_RUN=4
 ```
 
 If `gpt-5.5` is not available in your account, set `OPENAI_MODEL=gpt-5.4-mini` or any model your account supports.

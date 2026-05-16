@@ -219,3 +219,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Keep real vs sandbox status visible above the run
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Live Agentic Runtime Visibility
+
+- [x] Increase OpenAI agent output, timeout, and turn caps for richer live planning
+- [x] Add a live execution console that updates while the workflow runs
+- [x] Show planner provider, runtime, latency, and fallback reason in the UI
+- [x] Add logical agent workbench outputs for triage, vision, risk, policy, and response planning
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
