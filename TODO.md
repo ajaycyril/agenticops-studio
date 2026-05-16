@@ -209,4 +209,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Show the full-stack agentic runtime as evidence lanes: Physical AI, Edge Vision, MLOps, Guardrails, Agentic Actions
 - [x] Make the primary action and resulting outputs obvious on desktop and mobile
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
