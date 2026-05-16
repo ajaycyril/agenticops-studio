@@ -263,4 +263,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Convert stacked mobile stages into a horizontal animated stage rail
 - [x] Keep rule vs ML vs agentic distinction visible without scrolling through setup
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
