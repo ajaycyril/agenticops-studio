@@ -254,4 +254,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Make the agentic distinction explicit across fire, unclear-camera, and false-alarm scenarios
 - [x] Show rule-only, ML-only, and agentic reasoning differences during the live run
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
