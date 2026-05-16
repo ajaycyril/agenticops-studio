@@ -255,3 +255,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Show rule-only, ML-only, and agentic reasoning differences during the live run
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Mobile-First Agentic Clarity Pass
+
+- [x] Move scenario and guardrail controls into the first mobile fold
+- [x] Put explanation and live reasoning before setup/details on mobile
+- [x] Convert stacked mobile stages into a horizontal animated stage rail
+- [x] Keep rule vs ML vs agentic distinction visible without scrolling through setup
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production

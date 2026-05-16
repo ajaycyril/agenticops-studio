@@ -530,6 +530,36 @@ export function StudioShell() {
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, maxWidth: 880 }}>
                 Watch the same fire incident move from evidence to prediction to agent plan to guardrail checks to audit.
               </Typography>
+              <Box sx={{ display: { xs: "grid", lg: "none" }, gap: 1.25, mt: 2 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Choose a scenario
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive
+                  fullWidth
+                  value={sampleName}
+                  onChange={(_, value) => value && loadDemo(value)}
+                  sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}
+                >
+                  <ToggleButton value="fire-smoke-room">Fire</ToggleButton>
+                  <ToggleButton value="unclear-camera">Unclear</ToggleButton>
+                  <ToggleButton value="cooking-smoke">Smoke</ToggleButton>
+                </ToggleButtonGroup>
+                <Typography variant="caption" color="text.secondary">
+                  Guardrail mode
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive
+                  fullWidth
+                  value={safetyMode}
+                  onChange={(_, value) => value && setSafetyMode(value)}
+                  sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}
+                >
+                  <ToggleButton value="strict">Strict</ToggleButton>
+                  <ToggleButton value="balanced">Balanced</ToggleButton>
+                  <ToggleButton value="rapid_response">Rapid</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
             </Box>
             <Button size="large" variant="contained" startIcon={<PlayArrowIcon />} onClick={() => void runDemo()} disabled={running} sx={{ minWidth: 260, py: 1.45 }}>
               {running ? "Running..." : "Run the agentic demo"}
@@ -541,8 +571,16 @@ export function StudioShell() {
             {message}
           </Alert>
 
-          <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "280px 1fr 380px" }, gap: 2 }}>
-            <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(2, 6, 23, 0.55)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
+          <Box
+            sx={{
+              mt: 2,
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", lg: "280px 1fr 380px" },
+              gridTemplateAreas: { xs: '"story" "tools"', lg: '"setup story tools"' },
+              gap: 2
+            }}
+          >
+            <Paper elevation={0} sx={{ display: { xs: "none", lg: "block" }, gridArea: "setup", p: 2, bgcolor: "rgba(2, 6, 23, 0.55)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
               <Typography variant="h6">Inputs</Typography>
               <Typography variant="caption" color="text.secondary">
                 No fiddly controls. Pick the story and safety posture.
@@ -583,11 +621,21 @@ export function StudioShell() {
               <Typography variant="body2" sx={{ mt: 0.75, color: "primary.main" }}>{selectedLesson.agentic}</Typography>
             </Paper>
 
-            <Box sx={{ display: "grid", gap: 2 }}>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(5, 1fr)" }, gap: 1 }}>
+            <Box sx={{ gridArea: "story", display: "grid", gap: 2 }}>
+              <Box
+                sx={{
+                  display: { xs: "flex", md: "grid" },
+                  gridTemplateColumns: { md: "repeat(5, 1fr)" },
+                  gap: 1,
+                  overflowX: { xs: "auto", md: "visible" },
+                  pb: { xs: 0.5, md: 0 },
+                  scrollSnapType: { xs: "x mandatory", md: "none" }
+                }}
+              >
                 {phases.map((phase) => (
                   <motion.div
                     key={phase.id}
+                    style={{ flex: "0 0 156px", scrollSnapAlign: "start" }}
                     animate={{
                       y: phase.status === "running" ? [0, -4, 0] : 0,
                       scale: activePhase === phase.id ? 1.02 : 1
@@ -602,7 +650,7 @@ export function StudioShell() {
                         width: "100%",
                         p: 1.4,
                         textAlign: "left",
-                        minHeight: 128,
+                        minHeight: { xs: 116, md: 128 },
                         cursor: "pointer",
                         color: "text.primary",
                         bgcolor: activePhase === phase.id ? "rgba(34, 211, 238, 0.15)" : "rgba(2, 6, 23, 0.55)",
@@ -635,7 +683,7 @@ export function StudioShell() {
                       </Box>
                       <Typography variant="h5">{selectedPhase.headline}</Typography>
                     </Stack>
-                    <Typography variant="body1" sx={{ mt: 2, lineHeight: 1.65 }}>
+                    <Typography variant="body1" sx={{ mt: 2, lineHeight: 1.65, fontSize: { xs: 15, md: 16 } }}>
                       {selectedPhase.explanation}
                     </Typography>
                     <Alert severity={selectedPhase.status === "blocked" ? "warning" : "info"} sx={{ mt: 2 }}>
@@ -671,7 +719,7 @@ export function StudioShell() {
                 </Box>
               </Paper>
 
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1 }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 1 }}>
                 {ruleVsMlVsAgent.map((item) => (
                   <TeachingPanel
                     key={item.title}
@@ -683,7 +731,7 @@ export function StudioShell() {
               </Box>
             </Box>
 
-            <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(2, 6, 23, 0.55)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
+            <Paper elevation={0} sx={{ gridArea: "tools", p: 2, bgcolor: "rgba(2, 6, 23, 0.55)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
               <Typography variant="h6">Governed tool plan</Typography>
               <Typography variant="caption" color="text.secondary">
                 This is where agentic AI becomes enterprise AI: proposed tools are checked before action.
