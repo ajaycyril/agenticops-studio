@@ -201,3 +201,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Hide technical JSON behind an optional details section
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Material Control-Room UX Refactor
+
+- [x] Add Material UI and replace the Studio surface with a cleaner Material workflow
+- [x] Make real, fallback, and sandbox boundaries visible before running
+- [x] Show the full-stack agentic runtime as evidence lanes: Physical AI, Edge Vision, MLOps, Guardrails, Agentic Actions
+- [x] Make the primary action and resulting outputs obvious on desktop and mobile
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
