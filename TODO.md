@@ -190,4 +190,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Keep OpenAI, Roboflow, browser ML, policy, trace, and decision record logic available behind one action
 - [x] Simplify landing page copy to match the new experience
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
