@@ -237,3 +237,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Make each stage clickable with plain-language explanation
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## From-Scratch Agentic Teaching Demo
+
+- [x] Replace Studio with a single narrative agentic AI demo
+- [x] Remove dashboard/control-tower complexity from the main experience
+- [x] Explain each sequence step in plain language while it runs
+- [x] Show why rule-based and ML are not agentic
+- [x] Show proposed tools, guardrail outcome, sandbox boundary, and audit record
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
