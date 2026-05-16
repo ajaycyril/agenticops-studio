@@ -228,3 +228,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Add logical agent workbench outputs for triage, vision, risk, policy, and response planning
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## First-Fold Agentic Cockpit Redesign
+
+- [x] Replace stacked vertical Studio layout with one first-fold cockpit
+- [x] Keep scenario, guardrails, run button, flow, explanation, and governed output visible together
+- [x] Remove incident tuning sliders and reduce nested card/detail layers
+- [x] Make each stage clickable with plain-language explanation
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production

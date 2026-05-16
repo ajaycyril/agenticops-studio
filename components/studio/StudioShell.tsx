@@ -14,10 +14,7 @@ import {
   Divider,
   LinearProgress,
   Paper,
-  Slider,
   Stack,
-  Switch,
-  TextField,
   ThemeProvider,
   ToggleButton,
   ToggleButtonGroup,
@@ -29,13 +26,11 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
-import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import MemoryIcon from "@mui/icons-material/Memory";
 import ModelTrainingIcon from "@mui/icons-material/ModelTraining";
 import PolicyIcon from "@mui/icons-material/Policy";
 import SensorsIcon from "@mui/icons-material/Sensors";
 import ShieldIcon from "@mui/icons-material/Shield";
-import TimelineIcon from "@mui/icons-material/Timeline";
 import { JsonInspector } from "@/components/studio/JsonInspector";
 import { getToolRegistry } from "@/lib/agent/tool-registry";
 import { buildDecisionRecord } from "@/lib/decision-record/build-decision-record";
@@ -55,71 +50,26 @@ import type { AgenticResult, DecisionRecord, IncidentState, MLResult, PolicyDeci
 const materialTheme = createTheme({
   palette: {
     mode: "dark",
-    background: {
-      default: "#08111f",
-      paper: "#101827"
-    },
-    primary: {
-      main: "#22d3ee"
-    },
-    secondary: {
-      main: "#60a5fa"
-    },
-    warning: {
-      main: "#f59e0b"
-    },
-    error: {
-      main: "#ef4444"
-    },
-    success: {
-      main: "#22c55e"
-    },
-    text: {
-      primary: "#eef6ff",
-      secondary: "#9fb1c8"
-    }
+    background: { default: "#07111f", paper: "#101827" },
+    primary: { main: "#22d3ee" },
+    secondary: { main: "#60a5fa" },
+    warning: { main: "#f59e0b" },
+    error: { main: "#ef4444" },
+    success: { main: "#22c55e" },
+    text: { primary: "#eef6ff", secondary: "#9fb1c8" }
   },
-  shape: {
-    borderRadius: 10
-  },
+  shape: { borderRadius: 10 },
   typography: {
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-    h3: {
-      letterSpacing: 0,
-      fontWeight: 720
-    },
-    h5: {
-      letterSpacing: 0,
-      fontWeight: 700
-    },
-    h6: {
-      letterSpacing: 0,
-      fontWeight: 700
-    }
+    h3: { letterSpacing: 0, fontWeight: 760 },
+    h5: { letterSpacing: 0, fontWeight: 740 },
+    h6: { letterSpacing: 0, fontWeight: 740 }
   },
   components: {
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          backgroundImage: "none"
-        }
-      }
-    },
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: "none",
-          fontWeight: 700
-        }
-      }
-    },
-    MuiChip: {
-      styleOverrides: {
-        root: {
-          fontWeight: 700
-        }
-      }
-    }
+    MuiPaper: { styleOverrides: { root: { backgroundImage: "none" } } },
+    MuiButton: { styleOverrides: { root: { textTransform: "none", fontWeight: 800 } } },
+    MuiChip: { styleOverrides: { root: { fontWeight: 760 } } },
+    MuiToggleButton: { styleOverrides: { root: { textTransform: "none", justifyContent: "flex-start", fontWeight: 760 } } }
   }
 });
 
@@ -129,26 +79,19 @@ const sampleImageMap = {
   "unclear-camera": { file: "unclear-camera.jpg", label: "Unclear camera" }
 } as const;
 
-const visiblePresets = [1, 2, 4];
-
-const physicalControls: {
-  key: "smokePpm" | "temperatureC" | "cameraFireConfidence";
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  suffix: string;
-}[] = [
-  { key: "smokePpm", label: "Smoke sensor", min: 0, max: 140, step: 1, suffix: " ppm" },
-  { key: "temperatureC", label: "Heat sensor", min: 10, max: 80, step: 1, suffix: " C" },
-  { key: "cameraFireConfidence", label: "Camera fire signal", min: 0, max: 1, step: 0.01, suffix: "" }
-];
+const demoPresets = [
+  { presetIndex: 1, sample: "fire-smoke-room", label: "Confirmed fire" },
+  { presetIndex: 2, sample: "unclear-camera", label: "Unclear camera" },
+  { presetIndex: 0, sample: "cooking-smoke", label: "False alarm" }
+] as const;
 
 type HealthStatus = {
   status: "ok";
   openaiConfigured: boolean;
   roboflowConfigured: boolean;
   openaiModel: string;
+  openaiMaxOutputTokens: number;
+  openaiTimeoutMs: number;
   openaiMaxAgentCallsPerRun: number;
 };
 
@@ -158,22 +101,26 @@ type AgentControls = {
 };
 
 type RunStepStatus = "waiting" | "running" | "done" | "fallback" | "failed";
-
-type RunStep = {
-  id: "rules" | "ml" | "vision" | "agent" | "policy" | "audit";
-  title: string;
-  detail: string;
-  status: RunStepStatus;
-};
+type RunStepId = "signals" | "vision" | "ml" | "agent" | "guardrails" | "actions";
+type RunStep = { id: RunStepId; title: string; short: string; detail: string; status: RunStepStatus };
 
 const initialRunSteps: RunStep[] = [
-  { id: "rules", title: "Rule engine", detail: "Waiting for run", status: "waiting" },
-  { id: "ml", title: "Browser ML", detail: "Waiting for run", status: "waiting" },
-  { id: "vision", title: "Edge vision API", detail: "Waiting for run", status: "waiting" },
-  { id: "agent", title: "OpenAI agent planner", detail: "Waiting for run", status: "waiting" },
-  { id: "policy", title: "Guardrail evaluator", detail: "Waiting for run", status: "waiting" },
-  { id: "audit", title: "Decision record", detail: "Waiting for run", status: "waiting" }
+  { id: "signals", title: "Physical signals", short: "Collect", detail: "Waiting for run", status: "waiting" },
+  { id: "vision", title: "Edge vision", short: "See", detail: "Waiting for run", status: "waiting" },
+  { id: "ml", title: "ML risk", short: "Predict", detail: "Waiting for run", status: "waiting" },
+  { id: "agent", title: "Agent plan", short: "Reason", detail: "Waiting for run", status: "waiting" },
+  { id: "guardrails", title: "Guardrails", short: "Check", detail: "Waiting for run", status: "waiting" },
+  { id: "actions", title: "Actions + audit", short: "Record", detail: "Waiting for run", status: "waiting" }
 ];
+
+const stepIcons: Record<RunStepId, React.ReactNode> = {
+  signals: <SensorsIcon />,
+  vision: <CameraAltIcon />,
+  ml: <ModelTrainingIcon />,
+  agent: <AutoAwesomeIcon />,
+  guardrails: <PolicyIcon />,
+  actions: <FactCheckIcon />
+};
 
 function pct(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -190,9 +137,12 @@ function formatAction(action: string) {
   return action.replaceAll("_", " ");
 }
 
-function signalValue(incident: IncidentState, key: (typeof physicalControls)[number]["key"]) {
-  const value = incident[key];
-  return key === "cameraFireConfidence" ? pct(value) : `${value}${physicalControls.find((item) => item.key === key)?.suffix ?? ""}`;
+function stepColor(status: RunStepStatus): "default" | "primary" | "success" | "warning" | "error" {
+  if (status === "running") return "primary";
+  if (status === "done") return "success";
+  if (status === "fallback") return "warning";
+  if (status === "failed") return "error";
+  return "default";
 }
 
 function Surface({ children, sx }: { children: React.ReactNode; sx?: object }) {
@@ -201,8 +151,8 @@ function Surface({ children, sx }: { children: React.ReactNode; sx?: object }) {
       elevation={0}
       sx={{
         border: "1px solid rgba(148, 163, 184, 0.18)",
-        bgcolor: "rgba(15, 23, 42, 0.88)",
-        p: { xs: 2, md: 3 },
+        bgcolor: "rgba(15, 23, 42, 0.9)",
+        p: { xs: 1.5, md: 2 },
         ...sx
       }}
     >
@@ -211,36 +161,17 @@ function Surface({ children, sx }: { children: React.ReactNode; sx?: object }) {
   );
 }
 
-function StatusChip({ label, value, color = "default" }: { label: string; value: string; color?: "default" | "primary" | "success" | "warning" | "error" | "info" }) {
-  return (
-    <Chip
-      color={color}
-      variant={color === "default" ? "outlined" : "filled"}
-      label={`${label}: ${value}`}
-      sx={{ justifyContent: "space-between", maxWidth: "100%" }}
-    />
-  );
-}
-
-function EvidenceLine({ label, value }: { label: string; value: string }) {
+function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 0.75 }}>
       <Typography variant="body2" color="text.secondary">
         {label}
       </Typography>
-      <Typography variant="body2" sx={{ color: "text.primary", textAlign: "right", fontWeight: 700 }}>
+      <Typography variant="body2" sx={{ textAlign: "right", fontWeight: 800 }}>
         {value}
       </Typography>
     </Box>
   );
-}
-
-function stepColor(status: RunStepStatus): "default" | "primary" | "success" | "warning" | "error" | "info" {
-  if (status === "running") return "primary";
-  if (status === "done") return "success";
-  if (status === "fallback") return "warning";
-  if (status === "failed") return "error";
-  return "default";
 }
 
 export function StudioShell() {
@@ -252,13 +183,7 @@ export function StudioShell() {
   const [policyDecisions, setPolicyDecisions] = useState<PolicyDecision[]>([]);
   const [decisionRecord, setDecisionRecord] = useState<DecisionRecord | undefined>();
   const [trace, setTrace] = useState<TraceEvent[]>([
-    createTraceEvent({
-      type: "incident_created",
-      actor: "system",
-      status: "success",
-      output: clonePreset(1),
-      explanation: "Loaded confirmed fire scenario."
-    })
+    createTraceEvent({ type: "incident_created", actor: "system", status: "success", output: clonePreset(1) })
   ]);
   const [health, setHealth] = useState<HealthStatus | undefined>();
   const [message, setMessage] = useState<string>();
@@ -268,22 +193,18 @@ export function StudioShell() {
   const [modelVersion, setModelVersion] = useState(() => loadModelVersion() ?? DEFAULT_MODEL_VERSION);
   const [modelMetrics, setModelMetrics] = useState<MLResult["metrics"]>();
   const [sampleName, setSampleName] = useState<keyof typeof sampleImageMap>("fire-smoke-room");
-  const [hasRun, setHasRun] = useState(false);
-  const [agentControls, setAgentControls] = useState<AgentControls>({
-    operatingMode: "balanced",
-    authorityPosture: "critical_only"
-  });
-  const [plannerNote, setPlannerNote] = useState("Prioritize life safety. Require approvals before any physical-world action.");
+  const [agentControls, setAgentControls] = useState<AgentControls>({ operatingMode: "balanced", authorityPosture: "critical_only" });
   const [runSteps, setRunSteps] = useState<RunStep[]>(initialRunSteps);
-  const [agentRuntime, setAgentRuntime] = useState<{
-    provider?: string;
-    runtime?: string;
-    message?: string;
-    startedAt?: number;
-    latencyMs?: number;
-  }>({});
+  const [activeStepId, setActiveStepId] = useState<RunStepId>("signals");
+  const [agentRuntime, setAgentRuntime] = useState<{ provider?: string; runtime?: string; message?: string; latencyMs?: number }>({});
 
   const tools = useMemo(() => getToolRegistry(), []);
+  const selectedStep = runSteps.find((step) => step.id === activeStepId) ?? runSteps[0];
+  const selectedDemo = demoPresets.find((demo) => scenarioPresets[demo.presetIndex].incidentId === incident.incidentId) ?? demoPresets[0];
+  const blockedPolicies = policyDecisions.filter((policy) => policy.blocked);
+  const gatedPolicies = policyDecisions.filter((policy) => policy.requiresHumanApproval && !policy.blocked);
+  const topFeature = mlResult.featureImportance[0];
+  const resultJson = { incident, ruleResult, mlResult, visionResult, agenticResult, policyDecisions, decisionRecord };
 
   useEffect(() => {
     fetch("/api/health")
@@ -302,7 +223,8 @@ export function StudioShell() {
     return created;
   }
 
-  function updateRunStep(id: RunStep["id"], status: RunStepStatus, detail: string) {
+  function updateRunStep(id: RunStepId, status: RunStepStatus, detail: string) {
+    setActiveStepId(id);
     setRunSteps((current) => current.map((step) => (step.id === id ? { ...step, status, detail } : step)));
   }
 
@@ -311,29 +233,20 @@ export function StudioShell() {
     setAgenticResult(undefined);
     setPolicyDecisions([]);
     setDecisionRecord(undefined);
-    setHasRun(false);
     setRunSteps(initialRunSteps);
     setAgentRuntime({});
+    setActiveStepId("signals");
   }
 
-  function loadScenario(index: number) {
-    const next = clonePreset(index);
+  function loadDemo(presetIndex: number, sample: keyof typeof sampleImageMap) {
+    const next = clonePreset(presetIndex);
     setIncident(next);
+    setSampleName(sample);
     setRuleResult(evaluateRules(next));
     setMlResult({ ...heuristicRiskPrediction(next), modelVersion, metrics: modelMetrics });
     resetRunState();
     setMessage(undefined);
     appendTrace({ type: "incident_created", actor: "system", status: "success", output: next, explanation: `Loaded ${next.scenarioName}.` });
-  }
-
-  function updateIncident<K extends keyof IncidentState>(key: K, value: IncidentState[K]) {
-    setIncident((current) => {
-      const next = { ...current, [key]: value };
-      setRuleResult(evaluateRules(next));
-      setMlResult({ ...heuristicRiskPrediction(next), modelVersion, metrics: modelMetrics });
-      resetRunState();
-      return next;
-    });
   }
 
   function runRules(incidentForRun: IncidentState) {
@@ -347,12 +260,7 @@ export function StudioShell() {
     setTraining(true);
     appendTrace({ type: "ml_model_training_started", actor: "ml_model", input: { scenarioName: incidentForRun.scenarioName }, status: "pending" });
     try {
-      const trained = await trainRiskModel({
-        size: 220,
-        epochs: 18,
-        falseAlarmBias: incidentForRun.historicalFalseAlarmRate,
-        learningRate: 0.08
-      });
+      const trained = await trainRiskModel({ size: 220, epochs: 18, falseAlarmBias: incidentForRun.historicalFalseAlarmRate, learningRate: 0.08 });
       setModel(trained.model);
       setModelMetrics(trained.metrics);
       setModelVersion(trained.modelVersion);
@@ -364,12 +272,7 @@ export function StudioShell() {
     }
   }
 
-  async function runPrediction(
-    incidentForRun: IncidentState,
-    modelOverride?: tf.LayersModel,
-    versionOverride = modelVersion,
-    metricsOverride = modelMetrics
-  ) {
+  async function runPrediction(incidentForRun: IncidentState, modelOverride?: tf.LayersModel, versionOverride = modelVersion, metricsOverride = modelMetrics) {
     let probability: number;
     const features = incidentToFeatures(incidentForRun);
     const activeModel = modelOverride ?? model;
@@ -387,7 +290,7 @@ export function StudioShell() {
       modelVersion: versionOverride,
       metrics: metricsOverride,
       featureImportance: approximateFeatureImportance(features),
-      explanation: "ML predicts fire probability from fused signals. It does not dispatch drones, unlock gates, or notify authorities."
+      explanation: "ML predicts risk only. It never executes physical actions."
     };
     setMlResult(result);
     appendTrace({ type: "ml_model_predicted", actor: "ml_model", input: incidentForRun, output: result, status: "success" });
@@ -400,10 +303,7 @@ export function StudioShell() {
     const blob = await response.blob();
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === "string") resolve(reader.result);
-        else reject(new Error("Invalid sample image payload"));
-      };
+      reader.onloadend = () => (typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Invalid image payload")));
       reader.onerror = () => reject(new Error("Failed to read sample image"));
       reader.readAsDataURL(blob);
     });
@@ -436,31 +336,24 @@ export function StudioShell() {
   async function runComparison() {
     setRunning(true);
     setRunSteps(initialRunSteps);
-    setAgentRuntime({ startedAt: Date.now() });
-    setMessage("Live run started. Watch the execution console update stage by stage.");
+    setAgentRuntime({});
+    setMessage("Running. Watch the horizontal flow; the selected stage explains what is happening.");
     try {
       const incidentForRun = incident;
-      updateRunStep("rules", "running", "Evaluating deterministic smoke/heat thresholds.");
+      updateRunStep("signals", "running", "Reading smoke, heat, camera state, occupancy, drone, and gate context.");
       const rule = runRules(incidentForRun);
-      updateRunStep("rules", "done", `${formatAction(rule.action)} at ${rule.severity} severity.`);
+      updateRunStep("signals", "done", `Rule mode says ${formatAction(rule.action)} using smoke and heat only.`);
 
-      updateRunStep("ml", "running", model ? "Using the active TensorFlow.js model." : "Training a TensorFlow.js model in this browser.");
-      const trained = model ? undefined : await trainBrowserModel(incidentForRun);
-      updateRunStep("ml", "running", "Scoring the incident with the active model.");
-      
-      updateRunStep("vision", "running", `Sending ${sampleImageMap[sampleName].label} through the server-side vision route.`);
+      updateRunStep("vision", "running", `Calling server-side vision route for ${sampleImageMap[sampleName].label}.`);
       const vision = await runVision(incidentForRun);
-      updateRunStep("vision", vision.result.provider === "sample" ? "fallback" : "done", `${vision.result.provider} inference: fire ${pct(vision.result.maxFireConfidence)}, smoke ${pct(vision.result.maxSmokeConfidence)}.`);
+      updateRunStep("vision", vision.result.provider === "sample" ? "fallback" : "done", `${vision.result.provider}: fire ${pct(vision.result.maxFireConfidence)}, smoke ${pct(vision.result.maxSmokeConfidence)}.`);
 
-      const ml = await runPrediction(
-        vision.nextIncident,
-        trained?.model ?? model,
-        trained?.modelVersion ?? modelVersion,
-        trained?.metrics ?? modelMetrics
-      );
-      updateRunStep("ml", "done", `${pct(ml.fireProbability)} fire probability, ${ml.riskLevel} risk.`);
+      updateRunStep("ml", "running", model ? "Scoring with active browser ML model." : "Training TensorFlow.js model in browser, then scoring.");
+      const trained = model ? undefined : await trainBrowserModel(vision.nextIncident);
+      const ml = await runPrediction(vision.nextIncident, trained?.model ?? model, trained?.modelVersion ?? modelVersion, trained?.metrics ?? modelMetrics);
+      updateRunStep("ml", "done", `ML predicts ${pct(ml.fireProbability)} fire probability. It does not act.`);
 
-      updateRunStep("agent", "running", `${health?.openaiConfigured ? "Calling OpenAI Agents SDK" : "Using deterministic fallback"} with ${agentControls.operatingMode} posture.`);
+      updateRunStep("agent", "running", `${health?.openaiConfigured ? "Calling OpenAI Agents SDK" : "Using fallback planner"} with ${agentControls.operatingMode} posture.`);
       appendTrace({ type: "agent_called", actor: "llm_agent", input: { incidentId: vision.nextIncident.incidentId }, status: "pending" });
       const agentStart = Date.now();
       const response = await fetch("/api/agent/run", {
@@ -475,35 +368,24 @@ export function StudioShell() {
           policySummary: "TypeScript fire response policy evaluator v1",
           agentControls: {
             ...agentControls,
-            operatorInstruction: plannerNote
+            operatorInstruction: "Explain the governed handoff: evidence, proposed tool calls, policy checks, human approval gates, sandbox execution, and audit."
           }
         })
       });
       const data = await response.json();
       if (!data.ok) throw new Error(data.error.message);
-
       const result = data.result as AgenticResult;
-      const agentLatencyMs = Date.now() - agentStart;
-      setAgentRuntime({
-        provider: data.provider,
-        runtime: data.runtime,
-        message: data.message,
-        startedAt: agentStart,
-        latencyMs: agentLatencyMs
-      });
-      updateRunStep(
-        "agent",
-        data.provider === "openai" ? "done" : "fallback",
-        `${data.runtime}: ${result.proposedActions.length} actions proposed in ${(agentLatencyMs / 1000).toFixed(1)}s.`
-      );
+      const latencyMs = Date.now() - agentStart;
+      setAgentRuntime({ provider: data.provider, runtime: data.runtime, message: data.message, latencyMs });
+      updateRunStep("agent", data.provider === "openai" ? "done" : "fallback", `${data.runtime}: proposed ${result.proposedActions.length} governed actions.`);
 
-      updateRunStep("policy", "running", "Checking tool permissions, approval gates, and physical-safety policy.");
+      updateRunStep("guardrails", "running", "Checking proposed actions against policy, approval gates, and physical safety.");
       const policies = evaluatePoliciesForActions(result.proposedActions.map((proposal) => proposal.action), vision.nextIncident, ml);
-      updateRunStep("policy", "done", `${policies.length} checks, ${policies.filter((policy) => policy.blocked).length} blocked, ${policies.filter((policy) => policy.requiresHumanApproval && !policy.blocked).length} approval-gated.`);
+      updateRunStep("guardrails", "done", `${policies.length} checks: ${policies.filter((policy) => policy.blocked).length} blocked, ${policies.filter((policy) => policy.requiresHumanApproval && !policy.blocked).length} approval-gated.`);
+
+      updateRunStep("actions", "running", "Writing auditable decision record. Physical actions remain sandboxed.");
       const validatedEvent = appendTrace({ type: "agent_output_validated", actor: "llm_agent", output: result, status: "success", explanation: data.message });
       const policyEvent = appendTrace({ type: "policy_checked", actor: "policy", output: policies, status: "success" });
-
-      updateRunStep("audit", "running", "Writing local/session decision record with trace and governance metadata.");
       const record = buildDecisionRecord({
         runId: `RUN-${Date.now()}`,
         incident: vision.nextIncident,
@@ -514,663 +396,311 @@ export function StudioShell() {
         policyDecisions: policies,
         trace: [...trace, validatedEvent, policyEvent]
       });
-
       setAgenticResult(result);
       setPolicyDecisions(policies);
       setDecisionRecord(record);
-      setHasRun(true);
       sessionStorage.setItem("agenticops.latestDecisionRecord", JSON.stringify(record));
       appendTrace({ type: "decision_record_written", actor: "system", output: { runId: record.runId }, status: "success" });
-      updateRunStep("audit", "done", `Decision record ${record.runId} written.`);
-      setMessage("Run complete. The execution console shows the live stages; the agent workbench shows the planner output.");
+      updateRunStep("actions", "done", `Record ${record.runId} written. Proposed physical actions are sandbox only.`);
+      setMessage("Done. Click any stage in the horizontal flow to understand that part of agentic AI.");
     } catch (error) {
       const text = error instanceof Error ? error.message : "Run failed.";
       setMessage(text);
-      setRunSteps((current) =>
-        current.map((step) => (step.status === "running" ? { ...step, status: "failed", detail: text } : step))
-      );
+      setRunSteps((current) => current.map((step) => (step.status === "running" ? { ...step, status: "failed", detail: text } : step)));
       appendTrace({ type: "error", actor: "system", output: { message: text }, status: "failed" });
     } finally {
       setRunning(false);
     }
   }
 
-  const topFeature = mlResult.featureImportance[0];
-  const blockedPolicies = policyDecisions.filter((policy) => policy.blocked);
-  const gatedPolicies = policyDecisions.filter((policy) => policy.requiresHumanApproval && !policy.blocked);
-  const physicalActions = agenticResult?.proposedActions.filter((proposal) =>
-    ["dispatch_drone", "unlock_gate", "notify_authority"].includes(proposal.action)
-  );
-  const resultJson = { incident, ruleResult, mlResult, visionResult, agenticResult, policyDecisions, decisionRecord };
-
-  const realBoundary = [
-    { label: "OpenAI planner", value: health?.openaiConfigured ? `real API (${health.openaiModel})` : "fallback planner", color: health?.openaiConfigured ? "success" : "warning" },
-    { label: "Roboflow vision", value: health?.roboflowConfigured ? "real hosted inference" : "sample inference", color: health?.roboflowConfigured ? "success" : "warning" },
-    { label: "TensorFlow.js", value: model || hasRun ? "real browser-trained model" : "trains on first run", color: "info" },
-    { label: "Policy engine", value: "real TypeScript evaluator", color: "success" },
-    { label: "Drone/gate/authority", value: "sandbox only", color: "warning" }
-  ] as const;
-
-  const postureCopy = {
-    conservative: "asks for stronger evidence and more approvals",
-    balanced: "uses normal enterprise thresholds",
-    rapid_response: "proposes faster reconnaissance when risk rises"
-  } satisfies Record<AgentControls["operatingMode"], string>;
-
-  const authorityCopy = {
-    strict: "never proposes authority notification from the planner",
-    approval_gated: "requires human approval for authority notification",
-    critical_only: "allows authority notification only at critical risk"
-  } satisfies Record<AgentControls["authorityPosture"], string>;
-
-  const flowSteps = [
-    {
-      label: "Physical signals",
-      icon: <SensorsIcon />,
-      value: `${incident.smokePpm} ppm / ${incident.temperatureC} C`,
-      status: "real state"
-    },
-    {
-      label: "Edge vision",
-      icon: <CameraAltIcon />,
-      value: visionResult ? `fire ${pct(visionResult.maxFireConfidence)}` : sampleImageMap[sampleName].label,
-      status: visionResult ? visionResult.provider : "ready"
-    },
-    {
-      label: "ML risk",
-      icon: <ModelTrainingIcon />,
-      value: `${pct(mlResult.fireProbability)} ${mlResult.riskLevel}`,
-      status: model || hasRun ? "tf.js" : "baseline"
-    },
-    {
-      label: "Agent plan",
-      icon: <AutoAwesomeIcon />,
-      value: agenticResult ? `${agenticResult.proposedActions.length} actions` : "not run",
-      status: health?.openaiConfigured ? "OpenAI/fallback" : "fallback"
-    },
-    {
-      label: "Guardrails",
-      icon: <PolicyIcon />,
-      value: policyDecisions.length ? `${blockedPolicies.length} blocked / ${gatedPolicies.length} gated` : "pending",
-      status: "real policy"
-    },
-    {
-      label: "Audit",
-      icon: <FactCheckIcon />,
-      value: decisionRecord ? decisionRecord.runId : "pending",
-      status: "local record"
+  function stageExplanation(id: RunStepId) {
+    if (id === "signals") {
+      return {
+        title: "Rule-based automation detects",
+        body: "Rules are deterministic. They only inspect smoke and heat, then raise or escalate an alarm. They do not understand camera context, SOPs, tools, approvals, or policy.",
+        metrics: [
+          ["Smoke", `${incident.smokePpm} ppm`],
+          ["Heat", `${incident.temperatureC} C`],
+          ["Rule output", formatAction(ruleResult.action)],
+          ["Rule severity", ruleResult.severity]
+        ]
+      };
     }
-  ];
-
-  const agentWorkProducts = [
-    {
-      agent: "Triage Agent",
-      output: agenticResult?.incidentSummary ?? "Waiting for run",
-      proof: agenticResult ? agenticResult.riskAssessment.evidence.slice(0, 2).join(" | ") : "Summarizes severity and gaps."
-    },
-    {
-      agent: "Vision Context Agent",
-      output: visionResult ? `${visionResult.provider} saw fire ${pct(visionResult.maxFireConfidence)} and smoke ${pct(visionResult.maxSmokeConfidence)}.` : "Waiting for vision result",
-      proof: `Frame: ${sampleImageMap[sampleName].label}`
-    },
-    {
-      agent: "Risk Agent",
-      output: `${pct(mlResult.fireProbability)} fire probability, ${mlResult.riskLevel} risk.`,
-      proof: topFeature ? `Top feature: ${topFeature.feature}` : "Uses browser ML result."
-    },
-    {
-      agent: "Policy Agent",
-      output: policyDecisions.length ? `${blockedPolicies.length} blocked, ${gatedPolicies.length} approval-gated.` : "Waiting for policy checks",
-      proof: `${agentControls.authorityPosture} authority posture; ${agentControls.operatingMode} operating mode.`
-    },
-    {
-      agent: "Response Planner Agent",
-      output: agenticResult ? `${agenticResult.proposedActions.map((action) => formatAction(action.action)).join(", ")}` : "Waiting for structured action plan",
-      proof: agentRuntime.runtime ? `${agentRuntime.runtime}${agentRuntime.latencyMs ? ` in ${(agentRuntime.latencyMs / 1000).toFixed(1)}s` : ""}` : "OpenAI Agents SDK or deterministic fallback."
+    if (id === "vision") {
+      return {
+        title: "Edge / vision AI sees",
+        body: "Vision adds perception. The browser sends the selected camera frame to a server route. Roboflow runs when configured; sample fallback is clearly labeled when needed.",
+        metrics: [
+          ["Frame", sampleImageMap[sampleName].label],
+          ["Provider", visionResult?.provider ?? (health?.roboflowConfigured ? "roboflow ready" : "sample fallback")],
+          ["Fire confidence", visionResult ? pct(visionResult.maxFireConfidence) : pct(incident.cameraFireConfidence)],
+          ["Smoke confidence", visionResult ? pct(visionResult.maxSmokeConfidence) : pct(incident.cameraSmokeConfidence)]
+        ]
+      };
     }
-  ];
-
-  const runtimeLanes = [
-    {
-      title: "Physical AI",
-      icon: <SensorsIcon />,
-      status: "Real state model",
-      summary: "Smoke, heat, camera confidence, occupancy, drone availability, and access-control state become incident context.",
-      lines: [
-        ["Smoke", `${incident.smokePpm} ppm`],
-        ["Temperature", `${incident.temperatureC} C`],
-        ["Drone", incident.droneAvailable ? "available" : "unavailable"],
-        ["Gate", incident.gateLocked ? "locked" : "already unlocked"]
-      ]
-    },
-    {
-      title: "Edge / Vision AI",
-      icon: <CameraAltIcon />,
-      status: visionResult ? `${visionResult.provider} result` : "Ready",
-      summary: "The selected camera frame is sent to the server route. Keys stay server-side; fallback mode is labeled.",
-      lines: [
-        ["Frame", sampleImageMap[sampleName].label],
-        ["Fire confidence", visionResult ? pct(visionResult.maxFireConfidence) : pct(incident.cameraFireConfidence)],
-        ["Smoke confidence", visionResult ? pct(visionResult.maxSmokeConfidence) : pct(incident.cameraSmokeConfidence)],
-        ["Latency", visionResult ? `${visionResult.latencyMs} ms` : "after run"]
-      ]
-    },
-    {
-      title: "MLOps Risk Model",
-      icon: <ModelTrainingIcon />,
-      status: mlResult.modelVersion.includes("tfjs") ? "Browser model" : "Baseline",
-      summary: "A TensorFlow.js logistic model trains in-browser, versions the active model, and predicts risk without executing actions.",
-      lines: [
-        ["Fire probability", pct(mlResult.fireProbability)],
-        ["Risk", mlResult.riskLevel],
-        ["Top feature", topFeature ? topFeature.feature : "not available"],
-        ["Accuracy", mlResult.metrics ? pct(mlResult.metrics.accuracy) : "after training"]
-      ]
-    },
-    {
-      title: "Guardrails",
-      icon: <PolicyIcon />,
-      status: policyDecisions.length ? "Evaluated" : "Pending",
-      summary: "Schema validation, policy checks, tool permissions, human approval gates, and physical-safety rules sit between reasoning and action.",
-      lines: [
-        ["Policy checks", String(policyDecisions.length)],
-        ["Blocked", String(blockedPolicies.length)],
-        ["Approval needed", String(gatedPolicies.length)],
-        ["Alarm suppression", "never allowed"]
-      ]
-    },
-    {
-      title: "Agentic Orchestration",
-      icon: <AutoAwesomeIcon />,
-      status: agenticResult ? "Plan generated" : "Not run",
-      summary: "The agent reasons over evidence and proposes structured actions. It is not the control system.",
-      lines: [
-        ["Risk assessment", agenticResult?.riskAssessment.level ?? "after run"],
-        ["Actions proposed", agenticResult ? String(agenticResult.proposedActions.length) : "0"],
-        ["Physical actions", physicalActions?.length ? String(physicalActions.length) : "0"],
-        ["Decision record", decisionRecord ? decisionRecord.runId : "after run"]
-      ]
+    if (id === "ml") {
+      return {
+        title: "ML predicts, but does not act",
+        body: "The browser trains or uses a TensorFlow.js risk model. It outputs probability and feature importance. It cannot dispatch drones, unlock gates, or notify authorities.",
+        metrics: [
+          ["Fire probability", pct(mlResult.fireProbability)],
+          ["Risk level", mlResult.riskLevel],
+          ["Model", mlResult.modelVersion.includes("tfjs") ? "browser trained" : "baseline before run"],
+          ["Top feature", topFeature?.feature ?? "after run"]
+        ]
+      };
     }
+    if (id === "agent") {
+      return {
+        title: "Agentic AI coordinates",
+        body: "The planner reasons over rules, vision, ML, SOP context, tool contracts, and your guardrail posture. It proposes structured actions; it does not execute physical actions directly.",
+        metrics: [
+          ["Provider", agentRuntime.provider ?? (health?.openaiConfigured ? "OpenAI ready" : "fallback")],
+          ["Runtime", agentRuntime.runtime ?? "after run"],
+          ["Latency", agentRuntime.latencyMs ? `${(agentRuntime.latencyMs / 1000).toFixed(1)}s` : "after run"],
+          ["Actions proposed", agenticResult ? String(agenticResult.proposedActions.length) : "after run"]
+        ]
+      };
+    }
+    if (id === "guardrails") {
+      return {
+        title: "Guardrails decide what is allowed",
+        body: "Policy checks sit between reasoning and execution. They can block an action, require approval, or allow sandbox execution. This is the enterprise layer most agent demos skip.",
+        metrics: [
+          ["Agent posture", agentControls.operatingMode],
+          ["Authority rule", agentControls.authorityPosture],
+          ["Blocked", String(blockedPolicies.length)],
+          ["Approval-gated", String(gatedPolicies.length)]
+        ]
+      };
+    }
+    return {
+      title: "Actions are sandboxed and audited",
+      body: "Tools are visible, typed, and governed. Drone, gate, and authority actions are simulated by design. The decision record captures inputs, model outputs, policy decisions, and trace.",
+      metrics: [
+        ["Physical actions", "sandbox only"],
+        ["Decision record", decisionRecord?.runId ?? "after run"],
+        ["Trace events", String(trace.length)],
+        ["Audit storage", "session/local demo store"]
+      ]
+    };
+  }
+
+  const explanation = stageExplanation(activeStepId);
+  const proposedActions = agenticResult?.proposedActions ?? [];
+  const agentWork = [
+    ["Triage", agenticResult?.incidentSummary ?? "Summarizes severity after run."],
+    ["Vision", visionResult ? `${visionResult.provider}: fire ${pct(visionResult.maxFireConfidence)}` : "Interprets camera confidence after vision run."],
+    ["Risk", `${pct(mlResult.fireProbability)} fire probability, ${mlResult.riskLevel} risk.`],
+    ["Policy", policyDecisions.length ? `${blockedPolicies.length} blocked, ${gatedPolicies.length} approval-gated.` : "Checks proposed actions after planner run."],
+    ["Planner", proposedActions.length ? proposedActions.map((item) => formatAction(item.action)).join(", ") : "Produces a governed action plan."]
   ];
 
   return (
     <ThemeProvider theme={materialTheme}>
       <CssBaseline />
-      <Box sx={{ mx: "auto", maxWidth: 1440, px: { xs: 0, md: 1 }, pb: 4 }}>
-        <Surface sx={{ overflow: "hidden", position: "relative" }}>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.15fr .85fr" }, gap: 3, alignItems: "stretch" }}>
+      <Box sx={{ mx: "auto", maxWidth: 1500, px: { xs: 0, md: 1 }, pb: 2 }}>
+        <Surface sx={{ minHeight: { lg: "calc(100vh - 104px)" }, display: "grid", gap: 2 }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr auto" }, gap: 2, alignItems: "center" }}>
             <Box>
               <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
-                <Chip icon={<ShieldIcon />} color="primary" label="Governed agentic AI" />
-                <Chip variant="outlined" label="Real APIs where configured" />
-                <Chip variant="outlined" label="Sandbox physical actions" />
+                <Chip color="primary" icon={<ShieldIcon />} label="Agentic AI control plane" />
+                <Chip color={health?.openaiConfigured ? "success" : "warning"} label={`OpenAI ${health?.openaiConfigured ? health.openaiModel : "fallback"}`} />
+                <Chip color={health?.roboflowConfigured ? "success" : "warning"} label={`Vision ${health?.roboflowConfigured ? "Roboflow" : "sample"}`} />
+                <Chip color="warning" label="Physical actions sandboxed" />
               </Stack>
-              <Typography variant="h3" sx={{ mt: 3, maxWidth: 820 }}>
-                Tune the control plane. Run the incident. Watch governance change the outcome.
+              <Typography variant="h3" sx={{ mt: 1.5 }}>
+                Agentic AI is the governed handoff from evidence to action.
               </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mt: 2, maxWidth: 760, fontSize: 17, lineHeight: 1.55 }}>
-                The useful part is the governed handoff: models reason, tools are constrained, humans approve risky actions, and every decision is recorded.
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, maxWidth: 900 }}>
+                Rule-based automation detects. ML predicts. Agentic AI coordinates. Enterprise agentic AI governs execution.
               </Typography>
-              <Box sx={{ mt: 3, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 1.5 }}>
-                <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.25)" }}>
-                  <Typography variant="overline" color="warning.main">
-                    Rule-based
-                  </Typography>
-                  <Typography variant="h6">Detects</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Fixed if/else alarm logic. No context fusion.
-                  </Typography>
-                </Paper>
-                <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(96, 165, 250, 0.12)", border: "1px solid rgba(96, 165, 250, 0.25)" }}>
-                  <Typography variant="overline" color="secondary.main">
-                    ML-based
-                  </Typography>
-                  <Typography variant="h6">Predicts</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Learns risk probability. No tool execution.
-                  </Typography>
-                </Paper>
-                <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(34, 211, 238, 0.12)", border: "1px solid rgba(34, 211, 238, 0.25)" }}>
-                  <Typography variant="overline" color="primary.main">
-                    Agentic
-                  </Typography>
-                  <Typography variant="h6">Governs</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Coordinates evidence, tools, policy, approval, and audit.
-                  </Typography>
-                </Paper>
-              </Box>
             </Box>
+            <Button size="large" variant="contained" startIcon={<AccountTreeIcon />} onClick={() => void runComparison()} disabled={running || training} sx={{ minWidth: { lg: 310 }, py: 1.5 }}>
+              {running || training ? "Running live workflow..." : "Run live agentic workflow"}
+            </Button>
+          </Box>
 
-            <Paper elevation={0} sx={{ p: 2.5, bgcolor: "rgba(2, 6, 23, 0.65)", border: "1px solid rgba(34, 211, 238, 0.22)" }}>
-              <Typography variant="h6">Real vs sandbox boundary</Typography>
-              <Stack spacing={1.2} sx={{ mt: 2 }}>
-                {realBoundary.map((item) => (
-                  <StatusChip key={item.label} label={item.label} value={item.value} color={item.color} />
+          {running || training ? <LinearProgress /> : null}
+          {message ? <Alert severity={message.startsWith("Done") ? "success" : message.includes("failed") ? "error" : "info"}>{message}</Alert> : null}
+
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(6, 1fr)" }, gap: 1 }}>
+            {runSteps.map((step, index) => (
+              <Paper
+                key={step.id}
+                component="button"
+                onClick={() => setActiveStepId(step.id)}
+                elevation={0}
+                sx={{
+                  p: 1.25,
+                  minHeight: 112,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  color: "text.primary",
+                  bgcolor: activeStepId === step.id ? "rgba(34, 211, 238, 0.16)" : "rgba(2, 6, 23, 0.6)",
+                  border: activeStepId === step.id ? "1px solid rgba(34, 211, 238, 0.62)" : "1px solid rgba(148, 163, 184, 0.16)"
+                }}
+              >
+                <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <Box sx={{ color: "primary.main", display: "flex" }}>{stepIcons[step.id]}</Box>
+                  <Chip size="small" color={stepColor(step.status)} label={step.status} />
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                  {index + 1}. {step.short}
+                </Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                  {step.title}
+                </Typography>
+              </Paper>
+            ))}
+          </Box>
+
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "310px 1fr 390px" }, gap: 2, minHeight: 0 }}>
+            <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
+              <Typography variant="h6">Setup</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Keep the demo simple: pick one incident and guardrail posture.
+              </Typography>
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                value={selectedDemo.label}
+                onChange={(_, value) => {
+                  const demo = demoPresets.find((item) => item.label === value);
+                  if (demo) loadDemo(demo.presetIndex, demo.sample);
+                }}
+                sx={{ mt: 1.5, display: "grid", gap: 1 }}
+              >
+                {demoPresets.map((demo) => (
+                  <ToggleButton key={demo.label} value={demo.label}>
+                    {demo.label}
+                  </ToggleButton>
                 ))}
+              </ToggleButtonGroup>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2">Configurable guardrails</Typography>
+              <Typography variant="caption" color="text.secondary">
+                These values are sent to the planner route.
+              </Typography>
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                value={agentControls.operatingMode}
+                onChange={(_, value) => value && setAgentControls((current) => ({ ...current, operatingMode: value }))}
+                sx={{ mt: 1, display: "grid", gap: 1 }}
+              >
+                <ToggleButton value="conservative">Conservative</ToggleButton>
+                <ToggleButton value="balanced">Balanced</ToggleButton>
+                <ToggleButton value="rapid_response">Rapid response</ToggleButton>
+              </ToggleButtonGroup>
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                value={agentControls.authorityPosture}
+                onChange={(_, value) => value && setAgentControls((current) => ({ ...current, authorityPosture: value }))}
+                sx={{ mt: 1, display: "grid", gap: 1 }}
+              >
+                <ToggleButton value="strict">Strict authority</ToggleButton>
+                <ToggleButton value="approval_gated">Approval gated</ToggleButton>
+                <ToggleButton value="critical_only">Critical only</ToggleButton>
+              </ToggleButtonGroup>
+              <Divider sx={{ my: 2 }} />
+              <Metric label="Smoke" value={`${incident.smokePpm} ppm`} />
+              <Metric label="Heat" value={`${incident.temperatureC} C`} />
+              <Metric label="Camera frame" value={sampleImageMap[sampleName].label} />
+            </Paper>
+
+            <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(2, 6, 23, 0.5)", border: "1px solid rgba(34, 211, 238, 0.18)" }}>
+              <Stack direction={{ xs: "column", md: "row" }} sx={{ justifyContent: "space-between", gap: 1 }}>
+                <Box>
+                  <Typography variant="h5">{explanation.title}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, maxWidth: 780 }}>
+                    {explanation.body}
+                  </Typography>
+                </Box>
+                <Chip color={stepColor(selectedStep.status)} label={selectedStep.status} sx={{ alignSelf: { xs: "flex-start", md: "center" } }} />
               </Stack>
               <Alert severity="info" sx={{ mt: 2 }}>
-                The LLM proposes structured JSON. Policy and approval gates decide which sandbox tools may run. No real drone, gate, or authority API is called.
+                {selectedStep.detail}
               </Alert>
+              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
+                {explanation.metrics.map(([label, value]) => (
+                  <Paper key={label} elevation={0} sx={{ p: 1.5, bgcolor: "rgba(15, 23, 42, 0.8)" }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {label}
+                    </Typography>
+                    <Typography variant="subtitle2" sx={{ mt: 0.5, fontWeight: 900 }}>
+                      {value}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="h6">Logical agents inside the control plane</Typography>
+              <Box sx={{ mt: 1, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(5, 1fr)" }, gap: 1 }}>
+                {agentWork.map(([agent, output]) => (
+                  <Paper key={agent} elevation={0} sx={{ p: 1.25, bgcolor: "rgba(15, 23, 42, 0.72)", minHeight: 116 }}>
+                    <Typography variant="caption" sx={{ color: "primary.main", fontWeight: 900 }}>
+                      {agent}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75, lineHeight: 1.45 }}>
+                      {output}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Box>
+            </Paper>
+
+            <Paper elevation={0} sx={{ p: 2, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
+              <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
+                <Typography variant="h6">Governed output</Typography>
+                <Chip color={agentRuntime.provider === "openai" ? "success" : agentRuntime.provider ? "warning" : "default"} label={agentRuntime.provider ?? "waiting"} />
+              </Stack>
+              <Typography variant="caption" color="text.secondary">
+                Actions proposed by the planner, then checked by policy. No physical action is real.
+              </Typography>
+              <Box sx={{ mt: 1.5, display: "grid", gap: 1.25 }}>
+                {proposedActions.length ? (
+                  proposedActions.map((proposal) => {
+                    const policy = policyDecisions.find((item) => item.action === proposal.action);
+                    return (
+                      <Paper key={proposal.action} elevation={0} sx={{ p: 1.25, bgcolor: "rgba(15, 23, 42, 0.78)", border: "1px solid rgba(148, 163, 184, 0.14)" }}>
+                        <Stack direction="row" sx={{ justifyContent: "space-between", gap: 1, alignItems: "center" }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                            {formatAction(proposal.action)}
+                          </Typography>
+                          <Chip
+                            size="small"
+                            color={policy?.blocked ? "error" : policy?.requiresHumanApproval ? "warning" : "success"}
+                            label={policy?.blocked ? "blocked" : policy?.requiresHumanApproval ? "approval" : "allowed"}
+                          />
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                          {policy?.reason ?? proposal.reason}
+                        </Typography>
+                      </Paper>
+                    );
+                  })
+                ) : (
+                  <Alert severity="info" icon={<AutoAwesomeIcon />}>
+                    Press run. The proposed tool calls and guardrail results appear here.
+                  </Alert>
+                )}
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              <Metric label="Planner runtime" value={agentRuntime.runtime ?? "after run"} />
+              <Metric label="Planner latency" value={agentRuntime.latencyMs ? `${(agentRuntime.latencyMs / 1000).toFixed(1)}s` : "after run"} />
+              <Metric label="Approval gates" value={String(gatedPolicies.length)} />
+              <Metric label="Audit record" value={decisionRecord?.runId ?? "after run"} />
             </Paper>
           </Box>
         </Surface>
 
-        <Box sx={{ mt: 3, display: "grid", gridTemplateColumns: { xs: "1fr", xl: "420px 1fr" }, gap: 3 }}>
-          <Surface>
-            <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
-              <LocalFireDepartmentIcon color="warning" />
-              <Box>
-                <Typography variant="h5">1. Set the physical scene</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Pick the incident and camera evidence. Then run once.
-                </Typography>
-              </Box>
-            </Stack>
-
-            <ToggleButtonGroup
-              exclusive
-              fullWidth
-              value={String(visiblePresets.find((index) => scenarioPresets[index].incidentId === incident.incidentId) ?? 1)}
-              onChange={(_, value) => {
-                if (value) loadScenario(Number(value));
-              }}
-              sx={{ mt: 2, display: "grid", gridTemplateColumns: "1fr", gap: 1 }}
-            >
-              {visiblePresets.map((index) => {
-                const preset = scenarioPresets[index];
-                return (
-                  <ToggleButton key={preset.incidentId} value={String(index)} sx={{ justifyContent: "flex-start", py: 1.2 }}>
-                    <Stack spacing={0.3} sx={{ alignItems: "flex-start" }}>
-                      <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                        {preset.scenarioName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {preset.smokePpm} ppm, {preset.temperatureC} C, fire camera {pct(preset.cameraFireConfidence)}
-                      </Typography>
-                    </Stack>
-                  </ToggleButton>
-                );
-              })}
-            </ToggleButtonGroup>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Stack spacing={2}>
-              {physicalControls.map((control) => (
-                <Box key={control.key}>
-                  <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                    <Typography variant="body2" color="text.secondary">
-                      {control.label}
-                    </Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                      {signalValue(incident, control.key)}
-                    </Typography>
-                  </Stack>
-                  <Slider
-                    value={Number(incident[control.key])}
-                    min={control.min}
-                    max={control.max}
-                    step={control.step}
-                    onChange={(_, value) => updateIncident(control.key, value as never)}
-                  />
-                </Box>
-              ))}
-            </Stack>
-
-            <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5, mt: 1 }}>
-              <Paper elevation={0} sx={{ p: 1.5, bgcolor: "rgba(15, 23, 42, 0.72)" }}>
-                <Typography variant="caption" color="text.secondary">
-                  Drone available
-                </Typography>
-                <Switch checked={incident.droneAvailable} onChange={(_, value) => updateIncident("droneAvailable", value)} />
-              </Paper>
-              <Paper elevation={0} sx={{ p: 1.5, bgcolor: "rgba(15, 23, 42, 0.72)" }}>
-                <Typography variant="caption" color="text.secondary">
-                  Gate locked
-                </Typography>
-                <Switch checked={incident.gateLocked} onChange={(_, value) => updateIncident("gateLocked", value)} />
-              </Paper>
-            </Box>
-
-            <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-              Camera frame for vision API
-            </Typography>
-            <ToggleButtonGroup
-              exclusive
-              fullWidth
-              value={sampleName}
-              onChange={(_, value) => {
-                if (value) {
-                  setSampleName(value);
-                  resetRunState();
-                }
-              }}
-              sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 1 }}
-            >
-              {(Object.keys(sampleImageMap) as (keyof typeof sampleImageMap)[]).map((name) => (
-                <ToggleButton key={name} value={name} sx={{ justifyContent: "flex-start" }}>
-                  <CameraAltIcon sx={{ mr: 1 }} fontSize="small" />
-                  {sampleImageMap[name].label}
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-              <PolicyIcon color="primary" fontSize="small" />
-              <Typography variant="h6">2. Tune agent and guardrails</Typography>
-            </Stack>
-            <Typography variant="caption" color="text.secondary">
-              These controls are sent into the agent route and change fallback planner behavior too.
-            </Typography>
-
-            <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
-              Agent posture
-            </Typography>
-            <ToggleButtonGroup
-              exclusive
-              fullWidth
-              value={agentControls.operatingMode}
-              onChange={(_, value) => {
-                if (value) setAgentControls((current) => ({ ...current, operatingMode: value }));
-              }}
-              sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 1 }}
-            >
-              <ToggleButton value="conservative">Conservative</ToggleButton>
-              <ToggleButton value="balanced">Balanced</ToggleButton>
-              <ToggleButton value="rapid_response">Rapid response</ToggleButton>
-            </ToggleButtonGroup>
-            <Typography variant="caption" color="text.secondary">
-              {postureCopy[agentControls.operatingMode]}
-            </Typography>
-
-            <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
-              Authority guardrail
-            </Typography>
-            <ToggleButtonGroup
-              exclusive
-              fullWidth
-              value={agentControls.authorityPosture}
-              onChange={(_, value) => {
-                if (value) setAgentControls((current) => ({ ...current, authorityPosture: value }));
-              }}
-              sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 1 }}
-            >
-              <ToggleButton value="strict">Strict</ToggleButton>
-              <ToggleButton value="approval_gated">Approval gated</ToggleButton>
-              <ToggleButton value="critical_only">Critical only</ToggleButton>
-            </ToggleButtonGroup>
-            <Typography variant="caption" color="text.secondary">
-              {authorityCopy[agentControls.authorityPosture]}
-            </Typography>
-
-            <TextField
-              fullWidth
-              multiline
-              minRows={2}
-              label="Planner instruction"
-              value={plannerNote}
-              onChange={(event) => setPlannerNote(event.target.value)}
-              sx={{ mt: 2 }}
-              slotProps={{ htmlInput: { maxLength: 500 } }}
-            />
-
-            <Button
-              size="large"
-              variant="contained"
-              fullWidth
-              startIcon={<AccountTreeIcon />}
-              onClick={() => void runComparison()}
-              disabled={running || training}
-              sx={{ mt: 2.5, py: 1.4 }}
-            >
-              {running || training ? "Running full-stack workflow..." : "Run full-stack agentic workflow"}
-            </Button>
-            {running || training ? <LinearProgress sx={{ mt: 2 }} /> : null}
-            {message ? (
-              <Alert severity={message.includes("failed") || message.includes("quota") ? "warning" : "success"} sx={{ mt: 2 }}>
-                {message}
-              </Alert>
-            ) : null}
-          </Surface>
-
-          <Box sx={{ display: "grid", gap: 2 }}>
-            <Surface sx={{ borderColor: running ? "rgba(34, 211, 238, 0.5)" : "rgba(148, 163, 184, 0.18)" }}>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between" }}>
-                <Box>
-                  <Typography variant="h5">Live execution console</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    This is what happens when you click run. Each stage updates as the client calls local code and server routes.
-                  </Typography>
-                </Box>
-                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
-                  <Chip color={agentRuntime.provider === "openai" ? "success" : agentRuntime.provider ? "warning" : "default"} label={agentRuntime.provider ? `planner: ${agentRuntime.provider}` : "planner: waiting"} />
-                  <Chip color={agentRuntime.runtime?.includes("openai") ? "success" : agentRuntime.runtime ? "warning" : "default"} label={agentRuntime.runtime ?? "runtime pending"} />
-                  <Chip label={agentRuntime.latencyMs ? `${(agentRuntime.latencyMs / 1000).toFixed(1)}s` : "latency pending"} />
-                </Stack>
-              </Stack>
-              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)", xl: "repeat(6, 1fr)" }, gap: 1.25 }}>
-                {runSteps.map((step, index) => (
-                  <Paper
-                    key={step.id}
-                    elevation={0}
-                    sx={{
-                      p: 1.5,
-                      bgcolor: step.status === "running" ? "rgba(34, 211, 238, 0.12)" : "rgba(2, 6, 23, 0.58)",
-                      border: step.status === "running" ? "1px solid rgba(34, 211, 238, 0.48)" : "1px solid rgba(148, 163, 184, 0.16)",
-                      minHeight: 138
-                    }}
-                  >
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 900 }}>
-                        {String(index + 1).padStart(2, "0")}
-                      </Typography>
-                      <Chip size="small" color={stepColor(step.status)} label={step.status} />
-                    </Stack>
-                    <Typography variant="subtitle2" sx={{ mt: 1, fontWeight: 900 }}>
-                      {step.title}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75, lineHeight: 1.45 }}>
-                      {step.detail}
-                    </Typography>
-                  </Paper>
-                ))}
-              </Box>
-              {agentRuntime.message ? (
-                <Alert severity={agentRuntime.provider === "openai" ? "success" : "warning"} sx={{ mt: 2 }}>
-                  {agentRuntime.message}
-                </Alert>
-              ) : null}
-            </Surface>
-
-            <Surface>
-              <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
-                <TimelineIcon color="primary" />
-                <Box>
-              <Typography variant="h5">3. Runtime flow</Typography>
-              <Typography variant="body2" color="text.secondary">
-                    Follow the handoff from real-world signal to governed action proposal.
-              </Typography>
-                </Box>
-              </Stack>
-              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(6, 1fr)" }, gap: 1.25 }}>
-                {flowSteps.map((step) => (
-                  <Paper key={step.label} elevation={0} sx={{ p: 1.5, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center", color: "primary.main" }}>
-                      {step.icon}
-                      <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 800 }}>
-                        {step.status}
-                      </Typography>
-                    </Stack>
-                    <Typography variant="subtitle2" sx={{ mt: 1, fontWeight: 900 }}>
-                      {step.label}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>
-                      {step.value}
-                    </Typography>
-                  </Paper>
-                ))}
-              </Box>
-
-              <Typography variant="h6" sx={{ mt: 2.5 }}>
-                Difference in response
-              </Typography>
-              <Box sx={{ mt: 1, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(3, 1fr)" }, gap: 2 }}>
-                <Paper elevation={0} sx={{ p: 2, border: "1px solid rgba(245, 158, 11, 0.25)", bgcolor: "rgba(245, 158, 11, 0.08)" }}>
-                  <Chip size="small" color="warning" label="Rule engine" />
-                  <Typography variant="h6" sx={{ mt: 1 }}>
-                    Detects alarm conditions
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Uses only smoke and heat. It cannot reason over camera evidence, SOP, tools, policy, or approvals.
-                  </Typography>
-                  <Divider sx={{ my: 1.5 }} />
-                  <EvidenceLine label="Output" value={formatAction(ruleResult.action)} />
-                  <EvidenceLine label="Severity" value={ruleResult.severity} />
-                  <EvidenceLine label="Real system" value="Local TypeScript" />
-                  <EvidenceLine label="Executes tools" value="No" />
-                </Paper>
-
-                <Paper elevation={0} sx={{ p: 2, border: "1px solid rgba(96, 165, 250, 0.25)", bgcolor: "rgba(96, 165, 250, 0.08)" }}>
-                  <Chip size="small" color="info" label="ML model" />
-                  <Typography variant="h6" sx={{ mt: 1 }}>
-                    Predicts fire probability
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Uses fused signals and browser-side TensorFlow.js training. It produces probability, not execution.
-                  </Typography>
-                  <Divider sx={{ my: 1.5 }} />
-                  <EvidenceLine label="Prediction" value={pct(mlResult.fireProbability)} />
-                  <EvidenceLine label="Risk" value={mlResult.riskLevel} />
-                  <EvidenceLine label="Model" value={model || hasRun ? "TF.js trained" : "Baseline before run"} />
-                  <EvidenceLine label="Executes tools" value="No" />
-                </Paper>
-
-                <Paper elevation={0} sx={{ p: 2, border: "1px solid rgba(34, 211, 238, 0.28)", bgcolor: "rgba(34, 211, 238, 0.08)" }}>
-                  <Chip size="small" color="primary" label="Agentic control plane" />
-                  <Typography variant="h6" sx={{ mt: 1 }}>
-                    Governs response
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Uses all evidence, tool contracts, policy, approval gates, trace, and decision records.
-                  </Typography>
-                  <Divider sx={{ my: 1.5 }} />
-                  <EvidenceLine label="Agent risk" value={agenticResult?.riskAssessment.level ?? "after run"} />
-                  <EvidenceLine label="Actions proposed" value={agenticResult ? String(agenticResult.proposedActions.length) : "0"} />
-                  <EvidenceLine label="Policy checks" value={String(policyDecisions.length)} />
-                  <EvidenceLine label="Physical execution" value="Sandbox only" />
-                </Paper>
-              </Box>
-            </Surface>
-
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(5, 1fr)" }, gap: 2 }}>
-              {runtimeLanes.map((lane) => (
-                <Paper
-                  key={lane.title}
-                  elevation={0}
-                  sx={{
-                    p: 2,
-                    bgcolor: "rgba(15, 23, 42, 0.88)",
-                    border: "1px solid rgba(148, 163, 184, 0.18)",
-                    minHeight: 190
-                  }}
-                >
-                  <Stack direction="row" spacing={1} sx={{ alignItems: "center", color: "primary.main" }}>
-                    {lane.icon}
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                      {lane.title}
-                    </Typography>
-                  </Stack>
-                  <Chip size="small" label={lane.status} sx={{ mt: 1 }} color={lane.title === "Guardrails" ? "warning" : "default"} />
-                  <Divider sx={{ my: 1.5 }} />
-                  {lane.lines.map(([label, value]) => (
-                    <EvidenceLine key={label} label={label} value={value} />
-                  ))}
-                </Paper>
-              ))}
-            </Box>
-
-            <Surface>
-              <Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}>
-                <AutoAwesomeIcon color="primary" />
-                <Box>
-                  <Typography variant="h5">Agentic workbench</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Same run, shown as logical agents. This is the control-plane reasoning layer, not a chatbot.
-                  </Typography>
-                </Box>
-              </Stack>
-              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(5, 1fr)" }, gap: 1.5 }}>
-                {agentWorkProducts.map((item) => (
-                  <Paper key={item.agent} elevation={0} sx={{ p: 1.75, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(34, 211, 238, 0.16)", minHeight: 176 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 900, color: "primary.main" }}>
-                      {item.agent}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 1, lineHeight: 1.5 }}>
-                      {item.output}
-                    </Typography>
-                    <Divider sx={{ my: 1.25 }} />
-                    <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>
-                      {item.proof}
-                    </Typography>
-                  </Paper>
-                ))}
-              </Box>
-            </Surface>
-
-            <Surface>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between" }}>
-                <Box>
-                  <Typography variant="h5">3. Action plan, approvals, and audit</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    After a run, this section shows exactly what the agent proposed and why policy allowed, blocked, or approval-gated it.
-                  </Typography>
-                </Box>
-                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
-                  <Chip icon={<PolicyIcon />} color="warning" label={`${gatedPolicies.length} approval gates`} />
-                  <Chip icon={<ShieldIcon />} color={blockedPolicies.length ? "error" : "success"} label={`${blockedPolicies.length} blocked`} />
-                  <Chip icon={<FactCheckIcon />} color={decisionRecord ? "success" : "default"} label={decisionRecord ? "audit written" : "audit pending"} />
-                </Stack>
-              </Stack>
-
-              <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 2 }}>
-                {(agenticResult?.proposedActions.length ? agenticResult.proposedActions : []).map((proposal) => {
-                  const policy = policyDecisions.find((item) => item.action === proposal.action);
-                  return (
-                    <Paper key={proposal.action} elevation={0} sx={{ p: 2, bgcolor: "rgba(2, 6, 23, 0.58)", border: "1px solid rgba(148, 163, 184, 0.16)" }}>
-                      <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                          {formatAction(proposal.action)}
-                        </Typography>
-                        <Chip
-                          size="small"
-                          color={policy?.blocked ? "error" : policy?.requiresHumanApproval ? "warning" : "success"}
-                          label={policy?.blocked ? "blocked" : policy?.requiresHumanApproval ? "approval required" : "allowed"}
-                        />
-                      </Stack>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        {policy?.reason ?? proposal.reason}
-                      </Typography>
-                    </Paper>
-                  );
-                })}
-                {!agenticResult ? (
-                  <Alert severity="info" icon={<AutoAwesomeIcon />}>
-                    Press the run button to generate the governed plan. OpenAI will be used when quota is available; otherwise the deterministic fallback keeps the demo working.
-                  </Alert>
-                ) : null}
-              </Box>
-            </Surface>
-          </Box>
-        </Box>
-
-        <Accordion sx={{ mt: 3, bgcolor: "rgba(15, 23, 42, 0.88)", border: "1px solid rgba(148, 163, 184, 0.18)" }}>
+        <Accordion sx={{ mt: 2, bgcolor: "rgba(15, 23, 42, 0.88)", border: "1px solid rgba(148, 163, 184, 0.18)" }}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
               <MemoryIcon color="primary" />
-              <Typography sx={{ fontWeight: 800 }}>Technical payload: trace, policy, decision record JSON</Typography>
+              <Typography sx={{ fontWeight: 800 }}>Technical JSON</Typography>
             </Stack>
           </AccordionSummary>
           <AccordionDetails>
