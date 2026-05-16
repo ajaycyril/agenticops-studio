@@ -181,3 +181,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Reduce top-of-Studio hero to a compact status and action panel
 - [x] Re-run lint, typecheck, tests, and build
 - [x] Push and redeploy production
+
+## Minimal One-Screen Refactor
+
+- [x] Replace Studio tabs with one-screen three-use-case UI
+- [x] Keep only the core physical incident controls
+- [x] Make rule-based vs ML vs agentic differences explicit in each use case
+- [x] Keep OpenAI, Roboflow, browser ML, policy, trace, and decision record logic available behind one action
+- [x] Simplify landing page copy to match the new experience
+- [x] Re-run lint, typecheck, tests, and build
+- [ ] Push and redeploy production
