@@ -246,4 +246,4 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` complete.
 - [x] Show why rule-based and ML are not agentic
 - [x] Show proposed tools, guardrail outcome, sandbox boundary, and audit record
 - [x] Re-run lint, typecheck, tests, and build
-- [ ] Push and redeploy production
+- [x] Push and redeploy production
